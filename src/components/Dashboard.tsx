@@ -192,64 +192,64 @@ export default function Dashboard({ lang, role, orders }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-5">
         
         {/* Total Orders Card */}
-        <div id="stat-total-orders" className="bg-gradient-to-br from-blue-50/50 to-indigo-50/10 dark:from-blue-950/20 dark:to-slate-900/40 border border-blue-100/70 dark:border-blue-900/30 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-blue-200/80 ring-[3px] ring-blue-100/40 dark:ring-blue-950/30">
-          <div className="space-y-0.5">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-blue-600/80 dark:text-blue-400/80 uppercase tracking-wider block">{t.totalOrders}</span>
+        <div id="stat-total-orders" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-blue-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700">
+          <div className="space-y-1">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-blue-600/95 dark:text-blue-450 uppercase tracking-wider block">{t.totalOrders}</span>
             <span className="text-xl sm:text-2xl font-black text-slate-800 dark:text-slate-100 block">{stats.total}</span>
           </div>
           <div className="p-2 sm:p-2.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
             <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </div>
-
+ 
         {/* Delivered Card */}
-        <div id="stat-delivered" className="bg-gradient-to-br from-emerald-50/50 to-green-50/10 dark:from-emerald-950/20 dark:to-slate-900/40 border border-emerald-100/70 dark:border-emerald-900/30 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-emerald-200/80 ring-[3px] ring-emerald-100/40 dark:ring-emerald-950/30">
-          <div className="space-y-0.5">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-emerald-600/80 dark:text-emerald-400/80 uppercase tracking-wider block">{t.deliveredOrders}</span>
-            <span className="text-xl sm:text-2xl font-black text-green-600 dark:text-green-400 block">{stats.delivered}</span>
+        <div id="stat-delivered" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-emerald-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700">
+          <div className="space-y-1">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-emerald-600/95 dark:text-emerald-450 uppercase tracking-wider block">{t.deliveredOrders}</span>
+            <span className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 block">{stats.delivered}</span>
           </div>
           <div className="p-2 sm:p-2.5 bg-emerald-500/10 text-green-600 dark:text-green-400 rounded-xl">
             <CheckCircle className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </div>
-
+ 
         {/* Delayed Card */}
-        <div id="stat-delayed" className="bg-gradient-to-br from-amber-50/55 to-yellow-50/10 dark:from-amber-950/15 dark:to-slate-900/40 border border-amber-100/70 dark:border-amber-900/25 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-amber-200/80 ring-[3px] ring-amber-100/40 dark:ring-amber-950/30">
-          <div className="space-y-0.5">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-amber-600/80 dark:text-amber-450/85 uppercase tracking-wider block">{t.delayedOrders}</span>
+        <div id="stat-delayed" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-amber-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700">
+          <div className="space-y-1">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-amber-600/95 dark:text-amber-450 uppercase tracking-wider block">{t.delayedOrders}</span>
             <span className="text-xl sm:text-2xl font-black text-amber-500 block">{stats.delayed}</span>
           </div>
-          <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-500 rounded-xl">
+          <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-550 dark:text-amber-400 rounded-xl">
             <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </div>
-
+ 
         {/* Rejected Card */}
-        <div id="stat-rejected" className="bg-gradient-to-br from-rose-50/50 to-red-50/10 dark:from-rose-950/15 dark:to-slate-900/40 border border-rose-100/70 dark:border-rose-900/25 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-rose-200/80 ring-[3px] ring-rose-100/40 dark:ring-rose-950/30">
-          <div className="space-y-0.5">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-rose-600/85 dark:text-rose-455/85 uppercase tracking-wider block">{t.rejectedOrders}</span>
-            <span className="text-xl sm:text-2xl font-black text-red-550 block">{stats.rejected}</span>
+        <div id="stat-rejected" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-rose-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700">
+          <div className="space-y-1">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-rose-600/95 dark:text-rose-450 uppercase tracking-wider block">{t.rejectedOrders}</span>
+            <span className="text-xl sm:text-2xl font-black text-red-500 block">{stats.rejected}</span>
           </div>
-          <div className="p-2 sm:p-2.5 bg-red-500/10 text-red-500 rounded-xl">
+          <div className="p-2 sm:p-2.5 bg-red-500/10 text-red-500 dark:text-red-400 rounded-xl">
             <XCircle className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </div>
-
+ 
         {/* Total Sales Card */}
-        <div id="stat-revenue" className="bg-gradient-to-br from-violet-50/50 to-fuchsia-50/10 dark:from-violet-950/15 dark:to-slate-900/40 border border-violet-100/70 dark:border-violet-900/25 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-violet-200/80 sm:col-span-2 xl:col-span-1 ring-[3px] ring-violet-100/40 dark:ring-violet-950/30">
-          <div className="space-y-0.5 min-w-0">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-violet-600/80 dark:text-violet-400/80 uppercase tracking-wider block truncate">{t.totalSales}</span>
-            <span className="text-base sm:text-lg font-black text-slate-850 dark:text-slate-150 block truncate">{stats.totalSales.toLocaleString()} MAD</span>
+        <div id="stat-revenue" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-violet-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700 sm:col-span-2 xl:col-span-1">
+          <div className="space-y-1 min-w-0">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-violet-600/95 dark:text-violet-450 uppercase tracking-wider block truncate">{t.totalSales}</span>
+            <span className="text-base sm:text-lg font-black text-slate-800 dark:text-slate-100 block truncate">{stats.totalSales.toLocaleString()} MAD</span>
           </div>
           <div className="p-2 sm:p-2.5 bg-violet-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl shrink-0">
             <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </div>
-
+ 
         {/* Total Profits Card */}
-        <div id="stat-profits" className="bg-gradient-to-br from-emerald-50/50 to-teal-50/10 dark:from-teal-950/20 dark:to-slate-900/40 border border-teal-100/70 dark:border-teal-900/30 rounded-2xl py-3.5 px-4 shadow-2xs flex items-center justify-between transition-all duration-200 hover:shadow-xs hover:border-teal-200/80 sm:col-span-2 xl:col-span-1 ring-[3px] ring-teal-100/40 dark:ring-teal-955/20">
-          <div className="space-y-0.5 min-w-0">
-            <span className="text-[10px] sm:text-[11px] font-extrabold text-teal-600/85 dark:text-teal-400/85 uppercase tracking-wider block truncate">{t.totalProfits}</span>
+        <div id="stat-profits" className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-teal-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-slate-350 dark:hover:border-slate-700 sm:col-span-2 xl:col-span-1">
+          <div className="space-y-1 min-w-0">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-teal-600/95 dark:text-teal-450 uppercase tracking-wider block truncate">{t.totalProfits}</span>
             <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 block truncate">
               {role === 'PUBLIC' ? '[MASKED]' : `${stats.totalProfits.toLocaleString()} MAD`}
             </span>

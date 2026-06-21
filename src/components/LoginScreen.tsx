@@ -89,26 +89,6 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
         );
       });
 
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // FALLBACK TO HANDLE THE DEMO IF DATABASE STATE IS EMPTY
-      // ==========================================
-      if (!matchedSeller && (rawInput === 'abdellah' || rawInput === 'admin' || rawInput === 'عبد الله')) {
-        matchedSeller = {
-          id: 'admin_1',
-          name: 'عبد الله (Abdellah)',
-          phone: '0600000000',
-          active: true,
-          createdAt: new Date().toISOString(),
-          username: 'abdellah',
-          email: 'ouaddou.abdellah.topo@gmail.com',
-          role: 'ADMIN'
-        };
-      }
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // ==========================================
-
       if (!matchedSeller) {
         throw new Error(lang === 'ar' ? 'العضو غير مسجل في قاعدة البيانات!' : 'Utilisateur non répertorié dans la base !');
       }
@@ -126,15 +106,7 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
       const storedPassword = matchedSeller.password ? matchedSeller.password.trim() : '123456';
       const enteredPassword = pInput.trim();
 
-      const isDevPasscode = 
-        pInput === '1234' || 
-        pInput === 'admin123456' || 
-        pInput === '123456' || 
-        pInput === 'admin123' || 
-        pInput === 'admin 1234' || 
-        pInput === 'admin';
-
-      if (enteredPassword !== storedPassword && !isDevPasscode) {
+      if (enteredPassword !== storedPassword) {
         throw new Error(lang === 'ar'
           ? `كلمة المرور غير صحيحة للحساب: [ ${loginEmail} ]. يرجى إدخال كلمة المرور المسجلة بشكل صحيح في لوحة التحكم.`
           : `Mot de passe incorrect pour le compte [ ${loginEmail} ].`
