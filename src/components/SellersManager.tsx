@@ -12,9 +12,23 @@ interface Props {
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
 }
 
+const ROLE_RANK: Record<string, number> = {
+  'ADMIN': 4,
+  'DEPUTY': 3,
+  'SUPERVISOR': 2,
+  'SELLER': 1,
+  'PUBLIC': 0
+};
+
 export default function SellersManager({ lang, role, currentUser, onDataChange, toast }: Props) {
   const t = translations[lang];
   const isReadOnly = role === 'PUBLIC';
+
+  const canManageUserWithRole = (targetRole: 'SELLER' | 'SUPERVISOR' | 'DEPUTY' | 'ADMIN' | undefined) => {
+    const currentRank = ROLE_RANK[role] || 0;
+    const targetRank = ROLE_RANK[targetRole || 'SELLER'] || 1;
+    return currentRank > targetRank;
+  };
   
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [allSellersListFull, setAllSellersListFull] = useState<Seller[]>([]);
@@ -117,6 +131,15 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       // Update
       const index = fullSellers.findIndex(s => s.id === editingId);
       if (index !== -1) {
+        const originalUser = fullSellers[index];
+        if (!canManageUserWithRole(originalUser.role)) {
+          toast(lang === 'ar' ? 'عذراً، ليس لديك الصلاحية لتعديل حساب برتبة مساوية أو أعلى منك!' : 'Désolé, vous n\'avez pas la permission de modifier un compte de rang égal ou supérieur.', 'error');
+          return;
+        }
+        if (!canManageUserWithRole(sellerRole)) {
+          toast(lang === 'ar' ? 'عذراً، لا يمكنك تعيين رتبة مساوية أو أعلى من رتبتك!' : 'Désolé, vous ne pouvez pas attribuer un rôle égal ou supérieur au vôtre.', 'error');
+          return;
+        }
         fullSellers[index] = {
           ...fullSellers[index],
           name: name.trim(),
@@ -133,6 +156,10 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       }
     } else {
       // Create
+      if (!canManageUserWithRole(sellerRole)) {
+        toast(lang === 'ar' ? 'عذراً، لا يمكنك إضافة حساب برتبة مساوية أو أعلى من رتبتك!' : 'Désolé, vous ne pouvez pas ajouter un compte de rôle égal ou supérieur au vôtre.', 'error');
+        return;
+      }
       const newSeller: Seller = {
         id: 'sel_' + Date.now(),
         name: name.trim(),
@@ -173,8 +200,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       return;
     }
 
+    const fullSellers = DatabaseService.getSellers();
+    const targetUser = fullSellers.find(s => s.id === id);
+    if (targetUser && !canManageUserWithRole(targetUser.role)) {
+      toast(lang === 'ar' ? 'عذراً، ليس لديك الصلاحية لحذف حساب برتبة مساوية أو أعلى منك!' : 'Désolé, vous n\'avez pas la permission de supprimer un compte de rang égal ou supérieur.', 'error');
+      return;
+    }
+
     if (deleteConfirmId === id) {
-      const fullSellers = DatabaseService.getSellers();
       const filtered = fullSellers.filter(s => s.id !== id);
       DatabaseService.saveSellers(filtered);
       toast(t.sellerDeletedSuccess, 'success');
@@ -192,6 +225,11 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   const toggleActiveState = (seller: Seller) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
+      return;
+    }
+
+    if (!canManageUserWithRole(seller.role)) {
+      toast(lang === 'ar' ? 'عذراً، ليس لديك الصلاحية لتعديل حالة هذا الحساب!' : 'Désolé, vous n\'avez pas la permission de modifier l\'état de ce compte.', 'error');
       return;
     }
 
@@ -475,10 +513,18 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 }}
                 className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-bold"
               >
-                <option value="SELLER">💼 {lang === 'ar' ? 'بائع عادي' : 'Vendeur Ordinaire'}</option>
-                <option value="SUPERVISOR">👥 {lang === 'ar' ? 'مشرف مجموعة' : 'Superviseur'}</option>
-                <option value="DEPUTY">🛡️ {lang === 'ar' ? 'نائب المدير' : 'Adjoint (Vice Admin)'}</option>
-                <option value="ADMIN">👑 {lang === 'ar' ? 'المدير العام' : 'Directeur (Admin)'}</option>
+                {ROLE_RANK[role] > ROLE_RANK['SELLER'] && (
+                  <option value="SELLER">💼 {lang === 'ar' ? 'بائع عادي' : 'Vendeur Ordinaire'}</option>
+                )}
+                {ROLE_RANK[role] > ROLE_RANK['SUPERVISOR'] && (
+                  <option value="SUPERVISOR">👥 {lang === 'ar' ? 'مشرف مجموعة' : 'Superviseur'}</option>
+                )}
+                {ROLE_RANK[role] > ROLE_RANK['DEPUTY'] && (
+                  <option value="DEPUTY">🛡️ {lang === 'ar' ? 'نائب المدير' : 'Adjoint (Vice Admin)'}</option>
+                )}
+                {ROLE_RANK[role] > ROLE_RANK['ADMIN'] && (
+                  <option value="ADMIN">👑 {lang === 'ar' ? 'المدير العام' : 'Directeur (Admin)'}</option>
+                )}
               </select>
             </div>
             <div className="flex items-center pt-6">
@@ -620,13 +666,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                   <td className="py-3 px-4">
                     <button
                       id={`toggle-seller-status-${seller.id}`}
-                      disabled={isReadOnly}
+                      disabled={isReadOnly || !canManageUserWithRole(seller.role)}
                       onClick={() => toggleActiveState(seller)}
                       className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium cursor-pointer transition ${
                         seller.active
                           ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-955/20 dark:text-emerald-450'
                           : 'bg-red-50 text-red-800 dark:bg-red-955/20 dark:text-red-450'
-                      } ${isReadOnly ? 'cursor-not-allowed opacity-90' : 'hover:scale-95'}`}
+                      } ${(isReadOnly || !canManageUserWithRole(seller.role)) ? 'cursor-not-allowed opacity-50' : 'hover:scale-95'}`}
+                      title={!canManageUserWithRole(seller.role) ? (lang === 'ar' ? 'لا توجد صلاحية لتعديل حالة هذا الحساب' : 'Pas de permission pour modifier l\'état') : undefined}
                     >
                       {seller.active ? (
                         <>
@@ -647,31 +694,40 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                   {!isReadOnly && (
                     <td className="py-3 px-4">
                       <div className="flex gap-1.5 justify-center items-center">
-                        <button
-                          id={`edit-seller-${seller.id}`}
-                          onClick={() => handleEditInit(seller)}
-                          className="cursor-pointer p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          id={`delete-seller-${seller.id}`}
-                          onClick={() => handleDelete(seller.id)}
-                          className={`cursor-pointer p-1.5 rounded transition flex items-center justify-center gap-1 text-[10px] font-bold ${
-                            deleteConfirmId === seller.id
-                              ? 'bg-rose-500 text-white hover:bg-rose-600 px-2'
-                              : 'text-slate-500 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          {deleteConfirmId === seller.id ? (
-                            <>
-                              <X className="w-3 h-3 animate-pulse shrink-0" />
-                              <span>{lang === 'ar' ? 'تأكيد؟' : 'Confirmer?'}</span>
-                            </>
-                          ) : (
-                            <Trash2 className="w-3.5 h-3.5" />
-                          )}
-                        </button>
+                        {canManageUserWithRole(seller.role) ? (
+                          <button
+                            id={`edit-seller-${seller.id}`}
+                            onClick={() => handleEditInit(seller)}
+                            className="cursor-pointer p-1.5 text-slate-500 hover:text-blue-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition"
+                            title={lang === 'ar' ? 'تعديل الحساب' : 'Modifier'}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <span className="p-1.5 text-slate-350 dark:text-slate-600 cursor-not-allowed text-xs" title={lang === 'ar' ? 'صلاحية غير كافية لتعديل حساب بهذا المستوى' : 'Permissions insuffisantes pour modifier un compte de ce niveau'}>
+                            🔒
+                          </span>
+                        )}
+                        {canManageUserWithRole(seller.role) && (
+                          <button
+                            id={`delete-seller-${seller.id}`}
+                            onClick={() => handleDelete(seller.id)}
+                            className={`cursor-pointer p-1.5 rounded transition flex items-center justify-center gap-1 text-[10px] font-bold ${
+                              deleteConfirmId === seller.id
+                                ? 'bg-rose-500 text-white hover:bg-rose-600 px-2'
+                                : 'text-slate-500 hover:text-red-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {deleteConfirmId === seller.id ? (
+                              <>
+                                <X className="w-3 h-3 animate-pulse shrink-0" />
+                                <span>{lang === 'ar' ? 'تأكيد؟' : 'Confirmer?'}</span>
+                              </>
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}

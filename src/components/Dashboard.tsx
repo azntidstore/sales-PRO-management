@@ -264,7 +264,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
       <div className="grid grid-cols-1 lga:grid-cols-2 gap-6">
 
         {/* Sales Expansion Progression over time */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs transition-colors ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
           <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             📈 {t.salesOverTime}
           </h3>
@@ -290,7 +290,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
         </div>
 
         {/* Sales by Product representation */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs transition-colors ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
           <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             🛍️ {t.salesByProduct}
           </h3>
@@ -315,7 +315,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
 
         {/* Profits by Seller Bar block (Hidden / Masked for Public) */}
         {role !== 'PUBLIC' && (
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs transition-colors ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+          <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
             <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
               💼 {t.profitsBySeller}
             </h3>
@@ -338,7 +338,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
         )}
 
         {/* Sales by City Bar representation */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs transition-colors ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
           <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             📍 {t.salesByCity}
           </h3>
@@ -360,7 +360,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
         </div>
 
         {/* Order status proportion donut chart */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs transition-colors ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
           <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3">
             📊 {t.orderStatusRatios}
           </h3>
@@ -408,7 +408,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
       <div className="grid grid-cols-1 lga:grid-cols-2 gap-6">
         
         {/* Top Sellers list */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-2xl p-5 shadow-xs ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
             <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
               <Award className="text-amber-500 w-4.5 h-4.5" />
@@ -444,7 +444,7 @@ export default function Dashboard({ lang, role, orders }: Props) {
         </div>
 
         {/* Top Products representation */}
-        <div className="bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-2xl p-5 shadow-xs ring-[3px] ring-slate-100/50 dark:ring-slate-900/30">
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
             <h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-1.5">
               <ThumbsUp className="text-blue-500 w-4.5 h-4.5" />

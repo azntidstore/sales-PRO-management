@@ -56,10 +56,12 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
     let uInput = rawInput;
 
     // Suffix dynamic formats
-    if (uInput === 'admin' || uInput === 'abdellah' || uInput === 'عبد الله' || uInput.includes('abdellah') || uInput.includes('عبدالله') || uInput.includes('عبد الله') || uInput.includes('ouaddou')) {
-      uInput = 'ouaddou.abdellah.topo@gmail.com';
-    } else if (uInput && !uInput.includes('@')) {
-      uInput = `${uInput}@gmail.com`;
+    if (!uInput.includes('@')) {
+      if (uInput === 'admin' || uInput === 'abdellah' || uInput === 'عبد الله' || uInput === 'عبدالله' || uInput === 'ouaddou') {
+        uInput = 'ouaddou.abdellah.topo@gmail.com';
+      } else if (uInput) {
+        uInput = `${uInput}@gmail.com`;
+      }
     }
 
     try {
