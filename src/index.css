@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Cairo", "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* Base resets & premium global styles */
+html, body {
+  font-family: "Cairo", "Inter", system-ui, sans-serif;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbars that match the visual theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.45);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.6);
+}
+
+/* Smooth active state transitions */
+.transition-all-custom {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* High-fidelity glowing highlights */
+.glow-primary {
+  box-shadow: 0 0 20px -3px rgba(59, 130, 246, 0.15);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.12);
+}
+
+/* Subtle dot-grid background for headers and empty canvases */
+.ambient-pattern {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+}
+
+.dark .ambient-pattern {
+  background-image: radial-gradient(rgba(51, 65, 85, 0.2) 1.5px, transparent 1.5px);
+}
+
+/* Accent glassmorphism effects */
+.glass-panel {
+  background-color: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+}
+
+.dark .glass-panel {
+  background-color: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+}

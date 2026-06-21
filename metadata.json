@@ -1,0 +1,6 @@
+{
+  "name": "Bilingual Sales Manager",
+  "description": "An elegant, multi-lingual CRM and sales manager with interactive dashboards, local and cloud-sync fallback database, offline support, and role-based permissions in Arabic, French, and English.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,110 @@
+{
+  "entities": {
+    "Seller": {
+      "title": "Seller",
+      "description": "A seller or sales agent in the CRM system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "username": { "type": "string" },
+        "passcode": { "type": "string" },
+        "role": { "type": "string", "enum": ["SELLER", "DEPUTY"] }
+      },
+      "required": ["id", "name", "phone", "active", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "A catalog product in the CRM system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productName": { "type": "string" },
+        "wholesalePrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "productName", "wholesalePrice", "sellingPrice", "active" ,"createdAt"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A sales order entered in the CRM system",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "sellerName": { "type": "string" },
+        "customerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "city": { "type": "string" },
+        "address": { "type": "string" },
+        "quantity": { "type": "number" },
+        "product": { "type": "string" },
+        "deliveryCost": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "notes": { "type": "string" },
+        "orderStatus": { "type": "string", "enum": ["PENDING", "DELIVERED", "DELAYED", "REJECTED"] },
+        "profit": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "createdByUid": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "orderDate", "sellerName", "customerName", "phone", "city", "quantity", "product", "deliveryCost", "totalAmount", "orderStatus", "profit", "createdBy", "createdAt"]
+    },
+    "SyncLog": {
+      "title": "SyncLog",
+      "description": "Google Sheets synchronization or audit log",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "action": { "type": "string" },
+        "status": { "type": "string", "enum": ["SUCCESS", "FAILED", "RETRYING"] },
+        "details": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "action", "status", "details"]
+    },
+    "UserSession": {
+      "title": "UserSession",
+      "description": "User session containing their active CRM role mapped to Firebase uid",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "DEPUTY", "SELLER"] }
+      },
+      "required": ["uid", "name", "role"]
+    }
+  },
+  "firestore": {
+    "/sellers/{sellerId}": {
+      "schema": "Seller",
+      "description": "Stores the active sales agents"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Stores catalog items available for orders"
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Stores individual client bookings and orders"
+    },
+    "/users/{userId}": {
+      "schema": "UserSession",
+      "description": "Stores anonymous auth uid mapping to active user role"
+    },
+    "/syncLogs/{logId}": {
+      "schema": "SyncLog",
+      "description": "Google sheets operations logs"
+    },
+    "/settings/{settingId}": {
+      "schema": { "type": "object" },
+      "description": "Key value global overrides like sheets document configuration"
+    }
+  }
+}
