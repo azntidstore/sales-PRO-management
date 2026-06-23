@@ -14,7 +14,7 @@ import { Seller, Product, Order, SheetsSyncLog } from '../types';
 
 // Dynamic seed files
 const SEED_SELLERS: Seller[] = [
-  { id: 'admin_1', name: 'عبد الله (Abdellah)', phone: '0600000000', active: true, createdAt: '2026-06-20T00:00:00.000Z', username: 'abdellah', email: 'ouaddou.abdellah.topo@gmail.com', role: 'ADMIN' }
+  { id: 'admin_1', name: 'عبد الله (Abdellah)', phone: '0600000000', active: true, createdAt: '2026-06-20T00:00:00.000Z', username: 'abdellah', email: 'ouaddou.abdellah.topo@gmail.com', role: 'ADMIN', password: '123' }
 ];
 
 const SEED_PRODUCTS: Product[] = [];

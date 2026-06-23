@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { DatabaseService } from './dbMock';
 import { Order, Language, UserRole } from './types';
 import { translations } from './locales';
+import { safeStorage } from './utils/safeStorage';
 
 import SellersManager from './components/SellersManager';
 import ProductsManager from './components/ProductsManager';
@@ -9,6 +10,7 @@ import OrderFormModal from './components/OrderFormModal';
 import OrdersTable from './components/OrdersTable';
 import Dashboard from './components/Dashboard';
 import LoginScreen from './components/LoginScreen';
+import appLogo from './assets/images/app_logo_1781856830506.jpg';
 
 import {
   LayoutDashboard,
@@ -45,15 +47,15 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'sellers'>('dashboard');
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('crm_isLoggedIn') === 'true';
+    return safeStorage.getItem('crm_isLoggedIn') === 'true';
   });
 
   // Multiuser configuration
   const [userRole, setUserRole] = useState<UserRole>(() => {
-    return (localStorage.getItem('crm_userRole') as UserRole) || 'ADMIN';
+    return (safeStorage.getItem('crm_userRole') as UserRole) || 'ADMIN';
   });
   const [currentUser, setCurrentUser] = useState<string>(() => {
-    return localStorage.getItem('crm_currentUser') || 'عبد الله (Admin)';
+    return safeStorage.getItem('crm_currentUser') || 'عبد الله (Admin)';
   });
 
   // Master Data Refresh Trigger
@@ -65,6 +67,9 @@ export default function App() {
 
   // Dynamic Toast alerts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Card filter navigation state
+  const [initialStatusFilter, setInitialStatusFilter] = useState<string | null>(null);
 
   // Profile dropdown visibility
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -119,7 +124,7 @@ export default function App() {
     // Only accept ADMIN or SELLER. Fallback to ADMIN if PUBLIC is somehow passed.
     const cleanRole: UserRole = role === 'PUBLIC' ? 'SELLER' : role;
     setUserRole(cleanRole);
-    localStorage.setItem('crm_userRole', cleanRole);
+    safeStorage.setItem('crm_userRole', cleanRole);
     
     let targetUser = '';
     if (cleanRole === 'ADMIN') {
@@ -133,7 +138,7 @@ export default function App() {
     }
     
     setCurrentUser(targetUser);
-    localStorage.setItem('crm_currentUser', targetUser);
+    safeStorage.setItem('crm_currentUser', targetUser);
     setDataTrigger(prev => prev + 1);
     addToast(
       lang === 'ar'
@@ -147,17 +152,17 @@ export default function App() {
     setIsLoggedIn(true);
     setUserRole(role);
     setCurrentUser(name);
-    localStorage.setItem('crm_isLoggedIn', 'true');
-    localStorage.setItem('crm_userRole', role);
-    localStorage.setItem('crm_currentUser', name);
+    safeStorage.setItem('crm_isLoggedIn', 'true');
+    safeStorage.setItem('crm_userRole', role);
+    safeStorage.setItem('crm_currentUser', name);
     setDataTrigger(prev => prev + 1);
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
-    localStorage.removeItem('crm_isLoggedIn');
-    localStorage.removeItem('crm_userRole');
-    localStorage.removeItem('crm_currentUser');
+    safeStorage.removeItem('crm_isLoggedIn');
+    safeStorage.removeItem('crm_userRole');
+    safeStorage.removeItem('crm_currentUser');
     addToast(
       lang === 'ar' ? '🔒 تم تسجيل الخروج بنجاح.' : '🔒 Déconnecté avec succès.',
       'info'
@@ -276,7 +281,7 @@ export default function App() {
             <div className="flex items-center gap-3">
               <div className="relative shrink-0">
                 <img 
-                  src="/src/assets/images/app_logo_1781856830506.jpg" 
+                  src={appLogo} 
                   alt="App Logo" 
                   referrerPolicy="no-referrer"
                   className="w-10 h-10 rounded-xl shadow-md border border-slate-200/65 dark:border-slate-800 object-cover"
@@ -399,7 +404,7 @@ export default function App() {
               {/* Mobile View App Branding */}
               <div className="flex items-center gap-2 lg:hidden">
                 <img 
-                  src="/src/assets/images/app_logo_1781856830506.jpg" 
+                  src={appLogo} 
                   alt="App Logo" 
                   referrerPolicy="no-referrer"
                   className="w-8 h-8 rounded-lg shadow-xs border border-slate-200 dark:border-slate-800 object-cover shrink-0"
@@ -591,7 +596,15 @@ export default function App() {
             {/* TABS VIEW CONTROLLER */}
             <div key={dataTrigger} className="space-y-6">
               {activeTab === 'dashboard' && (
-                <Dashboard lang={lang} role={userRole} orders={orders} />
+                <Dashboard 
+                  lang={lang} 
+                  role={userRole} 
+                  orders={orders} 
+                  onCardClick={(status) => {
+                    setInitialStatusFilter(status);
+                    setActiveTab('orders');
+                  }}
+                />
               )}
 
               {activeTab === 'orders' && (
@@ -603,6 +616,8 @@ export default function App() {
                   onDataChange={refreshAllData}
                   toast={addToast}
                   triggerFormOpen={initAddOrder}
+                  initialStatusFilter={initialStatusFilter}
+                  onClearInitialStatusFilter={() => setInitialStatusFilter(null)}
                 />
               )}
 

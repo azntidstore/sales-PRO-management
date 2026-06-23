@@ -12,6 +12,8 @@ interface Props {
   onDataChange: () => void;
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
   triggerFormOpen: () => void;
+  initialStatusFilter?: string | null;
+  onClearInitialStatusFilter?: () => void;
 }
 
 export default function OrdersTable({
@@ -21,7 +23,9 @@ export default function OrdersTable({
   onEditInit,
   onDataChange,
   toast,
-  triggerFormOpen
+  triggerFormOpen,
+  initialStatusFilter,
+  onClearInitialStatusFilter
 }: Props) {
   const t = translations[lang];
 
@@ -37,6 +41,16 @@ export default function OrdersTable({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+
+  useEffect(() => {
+    if (initialStatusFilter !== undefined && initialStatusFilter !== null) {
+      setFilterStatus(initialStatusFilter);
+      if (initialStatusFilter !== '') {
+        setShowFilters(true);
+      }
+      onClearInitialStatusFilter?.();
+    }
+  }, [initialStatusFilter, onClearInitialStatusFilter]);
 
   // Dropdown lists
   const [uniqueSellers, setUniqueSellers] = useState<string[]>([]);
@@ -147,9 +161,17 @@ export default function OrdersTable({
 
     rawOrders[orderIndex] = updatedOrder;
     DatabaseService.saveOrders(rawOrders);
+    
+    // Trigger synchronous or background push sync to Google Sheets
+    try {
+      DatabaseService.syncOrderToSheets(updatedOrder, false);
+    } catch (syncErr) {
+      console.error('[SyncError] Failed inline sheet sync:', syncErr);
+    }
+
     setOrders(rawOrders);
 
-    toast(lang === 'ar' ? 'تم تحديث حالة الطلبية والربح تلقائياً' : 'Statut mis à jour et profit recalculé', 'success');
+    toast(lang === 'ar' ? 'تم تحديث حالة الطلبية والربح ومزامنتها بنجاح' : 'Statut mis à jour, profit recalculé et synchronisé', 'success');
     onDataChange();
   };
 

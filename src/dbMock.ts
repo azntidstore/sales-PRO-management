@@ -1,6 +1,7 @@
 import { Seller, Product, Order, SheetsSyncLog } from './types';
 import { FirestoreService } from './utils/FirestoreService';
 import { isFirebaseConfigured } from './firebase';
+import { safeStorage } from './utils/safeStorage';
 
 // Real-time memory cache
 let cacheSellers: Seller[] = [];
@@ -21,7 +22,19 @@ let unsubscribes: (() => void)[] = [];
 // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
 // CODE À SUPPRIMER APRÈS EXPORT (DEFAULT MOCKS HAVE BEEN CLEARED)
 // ==========================================
-const DEFAULT_LOCAL_SELLERS: Seller[] = [];
+const DEFAULT_LOCAL_SELLERS: Seller[] = [
+  { 
+    id: 'admin_1', 
+    name: 'عبد الله (Abdellah)', 
+    phone: '0600000000', 
+    active: true, 
+    createdAt: '2026-06-20T00:00:00.000Z', 
+    username: 'abdellah', 
+    email: 'ouaddou.abdellah.topo@gmail.com', 
+    role: 'ADMIN',
+    password: '123'
+  }
+];
 const DEFAULT_LOCAL_PRODUCTS: Product[] = [];
 const DEFAULT_LOCAL_ORDERS: Order[] = [];
 // ==========================================
@@ -34,7 +47,7 @@ const loadLocal = (key: string, fallback: any) => {
   // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
   // ==========================================
   try {
-    const val = localStorage.getItem(`smart_crm_${key}`);
+    const val = safeStorage.getItem(`smart_crm_${key}`);
     return val ? JSON.parse(val) : fallback;
   } catch {
     return fallback;
@@ -49,7 +62,7 @@ const saveLocal = (key: string, val: any) => {
   // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
   // ==========================================
   try {
-    localStorage.setItem(`smart_crm_${key}`, JSON.stringify(val));
+    safeStorage.setItem(`smart_crm_${key}`, JSON.stringify(val));
   } catch {}
   // ==========================================
   // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
@@ -62,9 +75,21 @@ export let isInitialized = false;
 // Load data from LocalStorage as fallback or baseline
 export function loadFromLocalStorage() {
   cacheSellers = loadLocal('sellers', DEFAULT_LOCAL_SELLERS);
+  if (!Array.isArray(cacheSellers)) {
+    cacheSellers = DEFAULT_LOCAL_SELLERS;
+  }
   cacheProducts = loadLocal('products', DEFAULT_LOCAL_PRODUCTS);
+  if (!Array.isArray(cacheProducts)) {
+    cacheProducts = DEFAULT_LOCAL_PRODUCTS;
+  }
   cacheOrders = loadLocal('orders', DEFAULT_LOCAL_ORDERS);
+  if (!Array.isArray(cacheOrders)) {
+    cacheOrders = DEFAULT_LOCAL_ORDERS;
+  }
   cacheLogs = loadLocal('syncLogs', []);
+  if (!Array.isArray(cacheLogs)) {
+    cacheLogs = [];
+  }
   cacheConfig = loadLocal('sheetsConfig', cacheConfig);
 }
 
