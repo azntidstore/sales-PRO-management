@@ -53,3 +53,17 @@ export interface SheetsSyncLog {
   status: 'SUCCESS' | 'FAILED' | 'RETRYING';
   details: string;
 }
+
+export interface AppNotification {
+  id: string;
+  timestamp: string;
+  type: 'order_created' | 'order_deleted' | 'order_updated' | 'seller_created' | 'seller_updated' | 'seller_deleted';
+  titleAr: string;
+  titleFr: string;
+  titleEn: string;
+  detailsAr: string;
+  detailsFr: string;
+  detailsEn: string;
+  creatorName: string;
+}
+

@@ -105,15 +105,12 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
       console.log('LOGIN EMAIL=', loginEmail);
 
       // Secure and immediate password check using the password stored right inside the Firestore collection
-      const storedPassword = matchedSeller.password ? matchedSeller.password.trim() : '123456';
+      // Strict matching is now enforced with the actual password stored in Firestore.
+      // Default / fallback passes and backdoor developer passcodes ('123', '123456', 'admin') have been fully disabled.
+      const storedPassword = matchedSeller.password ? matchedSeller.password.trim() : '';
       const enteredPassword = pInput.trim();
 
-      // Flexible matching: if stored password is standard defaultValue ('123' or '123456' or unset), support both common passcodes.
-      // Additionally, allow the administrator account to access using '123', '123456', or 'admin' to bypass local storage discrepancies.
-      const isMatch = enteredPassword === storedPassword || 
-                      (storedPassword === '123456' && enteredPassword === '123') ||
-                      (storedPassword === '123' && enteredPassword === '123456') ||
-                      (matchedSeller.role === 'ADMIN' && (enteredPassword === '123' || enteredPassword === '123456' || enteredPassword === 'admin'));
+      const isMatch = enteredPassword === storedPassword && storedPassword !== '';
 
       if (!isMatch) {
         throw new Error(lang === 'ar'

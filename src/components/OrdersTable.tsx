@@ -46,7 +46,7 @@ export default function OrdersTable({
     if (initialStatusFilter !== undefined && initialStatusFilter !== null) {
       setFilterStatus(initialStatusFilter);
       if (initialStatusFilter !== '') {
-        setShowFilters(true);
+        setShowFilters(false);
       }
       onClearInitialStatusFilter?.();
     }
@@ -106,8 +106,19 @@ export default function OrdersTable({
 
     if (deleteConfirmId === id) {
       const original = DatabaseService.getOrders();
+      const deletedOrder = original.find(o => o.id === id);
       const updated = original.filter(o => o.id !== id);
       DatabaseService.saveOrders(updated);
+      if (deletedOrder) {
+        DatabaseService.triggerNotification('order_deleted', currentUser, {
+          titleAr: 'حذف طلبية',
+          titleFr: 'Commande supprimée',
+          titleEn: 'Order Deleted',
+          ar: `قام المستخدم "${currentUser}" بحذف الطلبية الخاصة بالزبون "${deletedOrder.customerName}".`,
+          fr: `L'utilisateur "${currentUser}" a supprimé la commande du client "${deletedOrder.customerName}".`,
+          en: `User "${currentUser}" deleted the order of client "${deletedOrder.customerName}".`
+        });
+      }
       setOrders(updated);
       toast(t.orderDeletedSuccess, 'success');
       onDataChange();
@@ -161,6 +172,15 @@ export default function OrdersTable({
 
     rawOrders[orderIndex] = updatedOrder;
     DatabaseService.saveOrders(rawOrders);
+
+    DatabaseService.triggerNotification('order_updated', currentUser, {
+      titleAr: 'تحديث حالة طلبية',
+      titleFr: 'Statut de commande mis à jour',
+      titleEn: 'Order Status Updated',
+      ar: `قام المستخدم "${currentUser}" بتحديث حالة الطلبية للزبون "${orderObj.customerName}" إلى: ${newStatus}.`,
+      fr: `L'utilisateur "${currentUser}" a mis à jour le statut de la commande de "${orderObj.customerName}" à : ${newStatus}.`,
+      en: `User "${currentUser}" updated the order status of "${orderObj.customerName}" to: ${newStatus}.`
+    });
     
     // Trigger synchronous or background push sync to Google Sheets
     try {
@@ -381,6 +401,8 @@ export default function OrdersTable({
     toast(lang === 'ar' ? 'تم مسح الفلاتر بنجاح' : 'Filtres effacés', 'info');
   };
 
+  const hasActiveFilters = !!(searchText || filterStatus || filterSeller || filterProduct || filterCity || startDate || endDate);
+
   return (
     <div id="orders-table-wrapper" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs transition-colors p-6">
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6 border-b border-slate-100 dark:border-slate-800 pb-5">
@@ -453,6 +475,64 @@ export default function OrdersTable({
       {role === 'PUBLIC' && (
         <div className="mb-5 text-xs text-amber-800 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/20 p-3.5 rounded-xl border border-amber-250 dark:border-amber-800/40">
           {t.publicNotice}
+        </div>
+      )}
+
+      {/* COMPACT ACTIVE FILTERS ROW (SHRINK/MINIMIZE VIEW) */}
+      {!showFilters && hasActiveFilters && (
+        <div className="flex flex-wrap items-center gap-2 mb-5 p-3 bg-slate-50 dark:bg-slate-950 border border-slate-150 dark:border-slate-800/60 rounded-xl text-xs animate-in fade-in duration-200">
+          <span className="text-slate-500 dark:text-slate-400 font-bold">
+            {lang === 'ar' ? 'الفلاتر النشطة:' : 'Filtres actifs:'}
+          </span>
+          
+          {filterStatus && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{t.status}: {t[filterStatus] || filterStatus}</span>
+              <button onClick={() => setFilterStatus('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {searchText && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{lang === 'ar' ? 'البحث' : 'Recherche'}: "{searchText}"</span>
+              <button onClick={() => setSearchText('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {filterSeller && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{t.sellerName}: {filterSeller}</span>
+              <button onClick={() => setFilterSeller('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {filterProduct && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{t.product}: {filterProduct}</span>
+              <button onClick={() => setFilterProduct('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {filterCity && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{t.city}: {filterCity}</span>
+              <button onClick={() => setFilterCity('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {(startDate || endDate) && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{lang === 'ar' ? 'التاريخ' : 'Date'}: {startDate || '*'} ➔ {endDate || '*'}</span>
+              <button onClick={() => { setStartDate(''); setEndDate(''); }} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          <button
+            onClick={clearAllFilters}
+            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-350 underline underline-offset-2 font-bold ml-auto rtl:mr-auto rtl:ml-0 text-[11px] px-2 cursor-pointer"
+          >
+            {lang === 'ar' ? 'إعادة تعيين الكل' : 'Tout réinitialiser'}
+          </button>
         </div>
       )}
 

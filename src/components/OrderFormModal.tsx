@@ -202,6 +202,14 @@ export default function OrderFormModal({
       });
 
       DatabaseService.saveOrders(updatedOrders);
+      DatabaseService.triggerNotification('order_updated', currentUser, {
+        titleAr: 'تحديث طلبية',
+        titleFr: 'Commande mise à jour',
+        titleEn: 'Order Updated',
+        ar: `قام المستخدم "${currentUser}" بتعديل الطلبية الخاصة بالزبون "${customerName.trim()}". الحالة الحالية: ${orderStatus}.`,
+        fr: `L'utilisateur "${currentUser}" a mis à jour la commande du client "${customerName.trim()}". Statut actuel: ${orderStatus}.`,
+        en: `User "${currentUser}" updated the order for client "${customerName.trim()}". Current status: ${orderStatus}.`
+      });
       toast(t.orderUpdatedSuccess, 'success');
     } else {
       // Create mode
@@ -227,6 +235,14 @@ export default function OrderFormModal({
 
       orders.push(newOrder);
       DatabaseService.saveOrders(orders);
+      DatabaseService.triggerNotification('order_created', currentUser, {
+        titleAr: 'إضافة طلبية جديدة',
+        titleFr: 'Nouvelle commande créée',
+        titleEn: 'New Order Created',
+        ar: `تم تسجيل طلبية جديدة للزبون "${customerName.trim()}" بقيمة ${parsedTotal} MAD بواسطة "${currentUser}".`,
+        fr: `Une nouvelle commande pour le client "${customerName.trim()}" d'une valeur de ${parsedTotal} MAD a été créée par "${currentUser}".`,
+        en: `A new order for client "${customerName.trim()}" worth ${parsedTotal} MAD was created by "${currentUser}".`
+      });
       toast(t.orderCreatedSuccess, 'success');
     }
 

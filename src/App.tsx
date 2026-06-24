@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { DatabaseService } from './dbMock';
-import { Order, Language, UserRole } from './types';
+import { Order, Language, UserRole, AppNotification } from './types';
 import { translations } from './locales';
 import { safeStorage } from './utils/safeStorage';
+import { FirestoreService } from './utils/FirestoreService';
 
 import SellersManager from './components/SellersManager';
 import ProductsManager from './components/ProductsManager';
@@ -26,7 +27,8 @@ import {
   AlertCircle,
   X,
   Plus,
-  LogOut
+  LogOut,
+  Bell
 } from 'lucide-react';
 
 interface ToastMessage {
@@ -74,6 +76,58 @@ export default function App() {
   // Profile dropdown visibility
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  // Notifications states
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [lastViewedNotificationTime, setLastViewedNotificationTime] = useState<number>(() => {
+    return Number(safeStorage.getItem('crm_lastViewedNotificationTime') || '0');
+  });
+
+  const rawOrders = DatabaseService.getOrders();
+  const rawSellers = DatabaseService.getSellers();
+  const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
+
+  // Filter notifications by hierarchy visibility constraints
+  const isNotificationVisible = (notif: AppNotification): boolean => {
+    // ADMIN (Manager & General Manager) sees everything
+    if (userRole === 'ADMIN') {
+      return true;
+    }
+
+    // Seller management notifications (seller_created, seller_updated, seller_deleted)
+    if (notif.type.startsWith('seller')) {
+      // Visible only to DEPUTY and ADMIN (ADMIN is already handled above)
+      return userRole === 'DEPUTY';
+    }
+
+    // Order notifications (order_created, order_updated, order_deleted)
+    if (notif.type.startsWith('order')) {
+      if (!currentSellerProfile) {
+        return userRole === 'DEPUTY'; // Default fallback for virtual/system logins
+      }
+
+      const creatorProfile = rawSellers.find(s => s.name === notif.creatorName);
+      if (!creatorProfile) {
+        return userRole === 'DEPUTY'; // Fallback if creator is not found
+      }
+
+      // Traversal to find all ancestor leaders up the chain
+      const ancestors: string[] = [];
+      let curr = creatorProfile;
+      while (curr && curr.parentId) {
+        ancestors.push(curr.parentId);
+        curr = rawSellers.find(s => s.id === curr.parentId);
+      }
+
+      // The logged-in user can see it if they are an administrative leader in the creator's path
+      return ancestors.includes(currentSellerProfile.id);
+    }
+
+    return false;
+  };
+
+  const visibleNotifications = notifications.filter(isNotificationVisible);
+
   // Initialize Database on application load helper
   useEffect(() => {
     DatabaseService.initialize()
@@ -100,6 +154,37 @@ export default function App() {
       html.classList.remove('dark');
     }
   }, [darkMode]);
+
+  // Listen to real-time notifications
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let initialLoadDone = false;
+    const mountTime = Date.now();
+
+    const unsubscribe = FirestoreService.onNotificationsChange((list) => {
+      setNotifications(list);
+
+      if (!initialLoadDone) {
+        initialLoadDone = true;
+        return;
+      }
+
+      // Check if there is a new notification added after mountTime
+      const newest = list[0];
+      if (newest && Date.parse(newest.timestamp) > mountTime) {
+        const isSelf = newest.creatorName === currentUser;
+        if (!isSelf && isNotificationVisible(newest)) {
+          const msg = lang === 'ar' ? newest.detailsAr : lang === 'fr' ? newest.detailsFr : newest.detailsEn;
+          addToast(msg, 'info');
+        }
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [isLoggedIn, lang, currentUser, userRole, currentSellerProfile, rawSellers, dataTrigger]);
 
   // Handle real-time database cache updates
   useEffect(() => {
@@ -186,9 +271,7 @@ export default function App() {
     setIsOrderModalOpen(true);
   };
 
-  const rawOrders = DatabaseService.getOrders();
-  const rawSellers = DatabaseService.getSellers();
-  const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
+
 
   let orders = rawOrders;
   if (userRole === 'SELLER') {
@@ -450,6 +533,95 @@ export default function App() {
                   <option value="fr">Français</option>
                   <option value="en">English (US)</option>
                 </select>
+              </div>
+
+              {/* Real-time Notifications Bell */}
+              <div className="relative" id="notifications-dropdown-wrapper">
+                <button
+                  onClick={() => {
+                    setIsNotificationsOpen(!isNotificationsOpen);
+                    if (!isNotificationsOpen) {
+                      const now = Date.now();
+                      setLastViewedNotificationTime(now);
+                      safeStorage.setItem('crm_lastViewedNotificationTime', String(now));
+                    }
+                  }}
+                  className="cursor-pointer p-1.5 sm:p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition relative flex items-center justify-center"
+                  title={lang === 'ar' ? 'الإشعارات' : 'Notifications'}
+                >
+                  <Bell className="w-3.5 h-3.5 sm:w-4 h-4 text-slate-600 dark:text-slate-300" />
+                  {visibleNotifications.filter(n => Date.parse(n.timestamp) > lastViewedNotificationTime).length > 0 && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                    </span>
+                  )}
+                </button>
+
+                {isNotificationsOpen && (
+                  <div className={`absolute ${lang === 'ar' ? 'left-0' : 'right-0'} mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl shadow-xl z-55 animate-in fade-in duration-100 overflow-hidden`}>
+                    <div className="p-3 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/45">
+                      <span className="font-extrabold text-xs text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                        🔔 {lang === 'ar' ? 'إشعارات النشاطات بالمتجر' : 'Flux de Notifications'}
+                      </span>
+                      <button
+                        onClick={() => setIsNotificationsOpen(false)}
+                        className="cursor-pointer p-1 hover:bg-slate-200 dark:hover:bg-slate-850 rounded-full text-slate-400"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-850">
+                      {visibleNotifications.length === 0 ? (
+                        <div className="p-6 text-center text-xs text-slate-400 font-medium">
+                          {lang === 'ar' ? 'لا توجد إشعارات حالياً' : 'Aucune notification pour le moment'}
+                        </div>
+                      ) : (
+                        visibleNotifications.map((notif) => {
+                          const isUnread = Date.parse(notif.timestamp) > lastViewedNotificationTime;
+                          const formattedTime = new Date(notif.timestamp).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'fr-FR', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          });
+                          return (
+                            <div
+                              key={notif.id}
+                              className={`p-3 text-[11px] sm:text-xs transition-colors flex items-start gap-2.5 ${
+                                isUnread ? 'bg-blue-50/50 dark:bg-blue-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-950/20'
+                              }`}
+                            >
+                              <div className="mt-0.5 shrink-0">
+                                {notif.type.startsWith('order') ? (
+                                  <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center border border-emerald-100/55 dark:border-emerald-800/30">
+                                    <span className="text-xs">📦</span>
+                                  </div>
+                                ) : (
+                                  <div className="w-6 h-6 rounded-md bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center border border-blue-100/55 dark:border-blue-800/30">
+                                    <span className="text-xs">👤</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between gap-1 mb-0.5">
+                                  <span className="font-extrabold text-slate-800 dark:text-slate-200 truncate">
+                                    {lang === 'ar' ? notif.titleAr : lang === 'fr' ? notif.titleFr : notif.titleEn}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold shrink-0">
+                                    {formattedTime}
+                                  </span>
+                                </div>
+                                <p className="text-slate-500 dark:text-slate-400 leading-normal font-medium text-start">
+                                  {lang === 'ar' ? notif.detailsAr : lang === 'fr' ? notif.detailsFr : notif.detailsEn}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Theme toggler */}

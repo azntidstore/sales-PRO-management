@@ -152,6 +152,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           password: assignedPassword
         };
         DatabaseService.saveSellers(fullSellers);
+        DatabaseService.triggerNotification('seller_updated', currentUser || 'System', {
+          titleAr: 'تحديث بيانات بائع',
+          titleFr: 'Vendeur mis à jour',
+          titleEn: 'Seller Updated',
+          ar: `قام المسؤول "${currentUser || 'المدير'}" بتعديل بيانات البائع/المستخدم "${name.trim()}". الرتبة: ${sellerRole}.`,
+          fr: `L'administrateur "${currentUser || 'Admin'}" a mis à jour les informations du vendeur/utilisateur "${name.trim()}". Rôle: ${sellerRole}.`,
+          en: `Admin "${currentUser || 'Admin'}" updated information for seller/user "${name.trim()}". Role: ${sellerRole}.`
+        });
         toast(t.sellerUpdatedSuccess, 'success');
       }
     } else {
@@ -174,6 +182,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       };
       fullSellers.push(newSeller);
       DatabaseService.saveSellers(fullSellers);
+      DatabaseService.triggerNotification('seller_created', currentUser || 'System', {
+        titleAr: 'إضافة بائع جديد',
+        titleFr: 'Nouveau vendeur créé',
+        titleEn: 'New Seller Created',
+        ar: `تم تسجيل حساب بائع جديد باسم "${name.trim()}" برتبة ${sellerRole} بواسطة "${currentUser || 'المدير'}".`,
+        fr: `Un nouveau compte vendeur "${name.trim()}" avec le rôle de ${sellerRole} a été créé par "${currentUser || 'Admin'}".`,
+        en: `A new seller account "${name.trim()}" with role ${sellerRole} was created by "${currentUser || 'Admin'}".`
+      });
       toast(t.sellerCreatedSuccess, 'success');
     }
 
@@ -210,6 +226,16 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     if (deleteConfirmId === id) {
       const filtered = fullSellers.filter(s => s.id !== id);
       DatabaseService.saveSellers(filtered);
+      if (targetUser) {
+        DatabaseService.triggerNotification('seller_deleted', currentUser || 'System', {
+          titleAr: 'حذف بائع',
+          titleFr: 'Vendeur supprimé',
+          titleEn: 'Seller Deleted',
+          ar: `قام المسؤول "${currentUser || 'المدير'}" بحذف حساب البائع/المستخدم "${targetUser.name}".`,
+          fr: `L'administrateur "${currentUser || 'Admin'}" a supprimé le compte du vendeur/utilisateur "${targetUser.name}".`,
+          en: `Admin "${currentUser || 'Admin'}" deleted the account of seller/user "${targetUser.name}".`
+        });
+      }
       toast(t.sellerDeletedSuccess, 'success');
       onDataChange();
       setDeleteConfirmId(null);
@@ -241,6 +267,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       return s;
     });
     DatabaseService.saveSellers(updated);
+    DatabaseService.triggerNotification('seller_updated', currentUser || 'System', {
+      titleAr: 'تغيير حالة بائع',
+      titleFr: 'État du vendeur changé',
+      titleEn: 'Seller State Toggled',
+      ar: `قام المسؤول "${currentUser || 'المدير'}" بتغيير حالة البائع "${seller.name}" إلى: ${!seller.active ? 'نشط' : 'غير نشط'}.`,
+      fr: `L'administrateur "${currentUser || 'Admin'}" a changé l'état du vendeur "${seller.name}" à : ${!seller.active ? 'Actif' : 'Inactif'}.`,
+      en: `Admin "${currentUser || 'Admin'}" toggled the state of seller "${seller.name}" to: ${!seller.active ? 'Active' : 'Inactive'}.`
+    });
     toast(t.sellerUpdatedSuccess, 'success');
     onDataChange();
     refreshSellers();

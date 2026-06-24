@@ -1,4 +1,4 @@
-import { Seller, Product, Order, SheetsSyncLog } from './types';
+import { Seller, Product, Order, SheetsSyncLog, AppNotification } from './types';
 import { FirestoreService } from './utils/FirestoreService';
 import { isFirebaseConfigured } from './firebase';
 import { safeStorage } from './utils/safeStorage';
@@ -329,5 +329,24 @@ export class DatabaseService {
       // ==========================================
     }
     return { successCount: count, failed: false };
+  }
+
+  static triggerNotification(
+    type: AppNotification['type'],
+    creatorName: string,
+    details: {
+      ar: string;
+      fr: string;
+      en: string;
+      titleAr: string;
+      titleFr: string;
+      titleEn: string;
+    }
+  ): void {
+    if (isFirebaseConfigured) {
+      FirestoreService.triggerNotification(type, creatorName, details).catch(err => {
+        console.error('Failed to trigger notification:', err);
+      });
+    }
   }
 }

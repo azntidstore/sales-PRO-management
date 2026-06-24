@@ -10,7 +10,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Seller, Product, Order, SheetsSyncLog } from '../types';
+import { Seller, Product, Order, SheetsSyncLog, AppNotification } from '../types';
 
 // Dynamic seed files
 const SEED_SELLERS: Seller[] = [
@@ -293,5 +293,52 @@ export class FirestoreService {
     await this.saveSheetsConfig(config);
 
     return { successCount: pendingCount, failed: false };
+  }
+
+  // --- Notifications Actions ---
+  static onNotificationsChange(callback: (notifications: AppNotification[]) => void) {
+    const q = collection(db, 'notifications');
+    return onSnapshot(q, (snapshot) => {
+      const list: AppNotification[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as AppNotification);
+      });
+      list.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+      callback(list);
+    }, (error) => {
+      console.warn('Notifications snapshot subscription status:', error.message);
+    });
+  }
+
+  static async saveNotification(notification: AppNotification): Promise<void> {
+    await setDoc(doc(db, 'notifications', notification.id), notification);
+  }
+
+  static async triggerNotification(
+    type: AppNotification['type'],
+    creatorName: string,
+    details: {
+      ar: string;
+      fr: string;
+      en: string;
+      titleAr: string;
+      titleFr: string;
+      titleEn: string;
+    }
+  ): Promise<void> {
+    const id = 'notif_' + Date.now() + Math.random().toString(36).substring(2, 6);
+    const notification: AppNotification = {
+      id,
+      timestamp: new Date().toISOString(),
+      type,
+      titleAr: details.titleAr,
+      titleFr: details.titleFr,
+      titleEn: details.titleEn,
+      detailsAr: details.ar,
+      detailsFr: details.fr,
+      detailsEn: details.en,
+      creatorName
+    };
+    await this.saveNotification(notification);
   }
 }
