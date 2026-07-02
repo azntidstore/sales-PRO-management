@@ -44,6 +44,55 @@ export default function OrderFormModal({
   const [totalAmount, setTotalAmount] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('PENDING');
+  const [assignedSupervisorId, setAssignedSupervisorId] = useState<string>('');
+
+  const getEligibleSupervisors = (): Seller[] => {
+    if (!sellerName) return [];
+    const activeSellers = DatabaseService.getSellers();
+    const selectedSeller = activeSellers.find(s => s.name === sellerName);
+    if (!selectedSeller) return [];
+
+    const directParentIds = new Set<string>();
+    if (selectedSeller.parentId) directParentIds.add(selectedSeller.parentId);
+    if (selectedSeller.parentIds) {
+      selectedSeller.parentIds.forEach(id => directParentIds.add(id));
+    }
+
+    const eligible = activeSellers.filter(s => directParentIds.has(s.id));
+    if (directParentIds.has('admin_1') && !eligible.some(e => e.id === 'admin_1')) {
+      eligible.push({
+        id: 'admin_1',
+        name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+        role: 'ADMIN',
+        phone: '',
+        active: true,
+        createdAt: ''
+      });
+    }
+    return eligible;
+  };
+
+  const handleSellerChange = (newSellerName: string) => {
+    setSellerName(newSellerName);
+    const sellersList = DatabaseService.getSellers();
+    const selectedSeller = sellersList.find(s => s.name === newSellerName);
+    if (selectedSeller) {
+      const directParentIds: string[] = [];
+      if (selectedSeller.parentId) directParentIds.push(selectedSeller.parentId);
+      if (selectedSeller.parentIds) {
+        selectedSeller.parentIds.forEach(id => {
+          if (!directParentIds.includes(id)) directParentIds.push(id);
+        });
+      }
+      if (directParentIds.length > 0) {
+        setAssignedSupervisorId(directParentIds[0]);
+      } else {
+        setAssignedSupervisorId('');
+      }
+    } else {
+      setAssignedSupervisorId('');
+    }
+  };
 
   useEffect(() => {
     // Collect active sellers/products
@@ -64,6 +113,7 @@ export default function OrderFormModal({
       setOrderStatus(editingOrder.orderStatus);
       setDeliveryCost(editingOrder.deliveryCost.toString());
       setTotalAmount(editingOrder.totalAmount.toString());
+      setAssignedSupervisorId(editingOrder.assignedSupervisorId || '');
 
       // Match product name to find ProductID if needed
       const foundProd = DatabaseService.getProducts().find(p => p.productName === editingOrder.product);
@@ -89,12 +139,38 @@ export default function OrderFormModal({
       // Auto select current seller if seller is logged in
       const sellersList = DatabaseService.getSellers().filter(s => s.active);
       const activeSellersObj = sellersList.find(s => s.name === currentUser);
+      let selName = '';
       if (activeSellersObj) {
+        selName = activeSellersObj.name;
         setSellerName(activeSellersObj.name);
       } else if (sellersList.length > 0) {
+        selName = sellersList[0].name;
         setSellerName(sellersList[0].name);
       } else {
         setSellerName('');
+      }
+
+      // Automatically select the first eligible supervisor
+      if (selName) {
+        const selectedSeller = sellersList.find(s => s.name === selName);
+        if (selectedSeller) {
+          const directParentIds: string[] = [];
+          if (selectedSeller.parentId) directParentIds.push(selectedSeller.parentId);
+          if (selectedSeller.parentIds) {
+            selectedSeller.parentIds.forEach(id => {
+              if (!directParentIds.includes(id)) directParentIds.push(id);
+            });
+          }
+          if (directParentIds.length > 0) {
+            setAssignedSupervisorId(directParentIds[0]);
+          } else {
+            setAssignedSupervisorId('');
+          }
+        } else {
+          setAssignedSupervisorId('');
+        }
+      } else {
+        setAssignedSupervisorId('');
       }
 
       // Auto select first active product
@@ -195,6 +271,7 @@ export default function OrderFormModal({
             notes: notes.trim(),
             orderStatus,
             profit,
+            assignedSupervisorId: assignedSupervisorId || undefined,
             updatedAt: new Date().toISOString()
           };
         }
@@ -229,6 +306,7 @@ export default function OrderFormModal({
         orderStatus,
         profit,
         createdBy: currentUser,
+        assignedSupervisorId: assignedSupervisorId || undefined,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -305,7 +383,7 @@ export default function OrderFormModal({
                 id="order-seller-select"
                 disabled={role === 'SELLER'} // Sellers cannot change the order seller attribution
                 value={sellerName}
-                onChange={e => setSellerName(e.target.value)}
+                onChange={e => handleSellerChange(e.target.value)}
                 className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
               >
                 {sellers.length === 0 ? (
@@ -318,6 +396,43 @@ export default function OrderFormModal({
               </select>
             </div>
           </div>
+
+          {/* Supervisor Selection if there are eligible supervisors */}
+          {getEligibleSupervisors().length > 0 && (
+            <div className="bg-blue-50/40 dark:bg-blue-950/10 border border-blue-100 dark:border-blue-900/30 p-4 rounded-xl space-y-2">
+              <label className="block text-xs font-bold text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+                <span className="flex h-2 w-2 rounded-full bg-blue-600"></span>
+                {lang === 'ar' ? 'المشرف المسؤول عن هذه الطلبية' : 'Superviseur responsable de cette commande'}*
+              </label>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
+                {lang === 'ar' 
+                  ? 'بما أن البائع مرتبط بأكثر من مشرف واحد، يرجى تحديد المشرف المسؤول عن هذه الطلبية لتوجيهها إليه وتجنب تكرارها لدى البقية.'
+                  : 'Puisque le vendeur est lié à plusieurs superviseurs, veuillez spécifier le superviseur responsable de cette commande.'}
+              </p>
+              <select
+                id="order-supervisor-select"
+                required
+                disabled={!!editingOrder && role !== 'ADMIN' && role !== 'DEPUTY'}
+                value={assignedSupervisorId}
+                onChange={e => setAssignedSupervisorId(e.target.value)}
+                className="w-full text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer disabled:bg-slate-100 dark:disabled:bg-slate-900 disabled:opacity-75 disabled:cursor-not-allowed"
+              >
+                <option value="">{lang === 'ar' ? '-- اختر المشرف --' : '-- Choisir le superviseur --'}</option>
+                {getEligibleSupervisors().map(sup => (
+                  <option key={sup.id} value={sup.id}>
+                    {sup.name} ({sup.role === 'ADMIN' ? (lang === 'ar' ? 'مدير' : 'Directeur') : (lang === 'ar' ? 'مشرف' : 'Superviseur')})
+                  </option>
+                ))}
+              </select>
+              {(!!editingOrder && role !== 'ADMIN' && role !== 'DEPUTY') && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-1">
+                  ⚠️ {lang === 'ar' 
+                    ? 'تعديل المشرف المسؤول متاح فقط لنائب المدير أو المدير العام.' 
+                    : 'La modification du superviseur est réservée au directeur adjoint ou supérieur.'}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Customer name */}

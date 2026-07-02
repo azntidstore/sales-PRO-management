@@ -21,7 +21,7 @@ import {
   Legend
 } from 'recharts';
 import { 
-  ShoppingCart, CheckCircle, Clock, XCircle, TrendingUp, DollarSign, Award, ThumbsUp, 
+  ShoppingCart, CheckCircle, Clock, Timer, XCircle, TrendingUp, DollarSign, Award, ThumbsUp, 
   FileText, ArrowDownToLine, BarChart3, List, Calendar, MapPin, Users, ShoppingBag, Crown, Sparkles, Star
 } from 'lucide-react';
 
@@ -64,7 +64,9 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
   const [viewOverTime, setViewOverTime] = useState<'chart' | 'list'>('chart');
   const [viewProduct, setViewProduct] = useState<'chart' | 'list'>('chart');
   const [viewSeller, setViewSeller] = useState<'chart' | 'list'>('chart');
+  const [viewSupervisor, setViewSupervisor] = useState<'chart' | 'list'>('chart');
   const [viewCity, setViewCity] = useState<'chart' | 'list'>('chart');
+  const [viewStatusChart, setViewStatusChart] = useState<'bar' | 'donut' | 'list'>('bar');
 
   // Dynamic date state filtering
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'this_month' | 'last_30_days'>('all');
@@ -97,6 +99,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
   // Calculate high-fidelity metrics
   const stats = useMemo(() => {
     const total = filteredOrders.length;
+    const pending = filteredOrders.filter(o => o.orderStatus === 'PENDING').length;
     const delivered = filteredOrders.filter(o => o.orderStatus === 'DELIVERED');
     const delayed = filteredOrders.filter(o => o.orderStatus === 'DELAYED').length;
     const rejected = filteredOrders.filter(o => o.orderStatus === 'REJECTED').length;
@@ -107,6 +110,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
 
     return {
       total,
+      pending,
       delivered: deliveredCount,
       delayed,
       rejected,
@@ -123,6 +127,49 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
     });
     return Object.entries(map).map(([name, profit]) => ({ name, profit }));
   }, [filteredOrders]);
+
+  // Chart 1.5: Profits by Supervisor
+  const profitBySupervisorData = useMemo(() => {
+    const map: Record<string, number> = {};
+    const sellers = DatabaseService.getSellers();
+    
+    const getSupervisorName = (o: Order): string => {
+      if (o.assignedSupervisorId) {
+        if (o.assignedSupervisorId === 'admin_1') {
+          return lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)';
+        }
+        const s = sellers.find(sel => sel.id === o.assignedSupervisorId);
+        if (s) return s.name;
+      }
+      
+      const sellerObj = sellers.find(sel => sel.name === o.sellerName);
+      if (!sellerObj) {
+        return lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)';
+      }
+      
+      if (sellerObj.role === 'SUPERVISOR' || sellerObj.role === 'ADMIN' || sellerObj.role === 'DEPUTY') {
+        return sellerObj.name;
+      }
+      
+      const parentId = sellerObj.parentId || (sellerObj.parentIds && sellerObj.parentIds[0]);
+      if (parentId) {
+        if (parentId === 'admin_1') {
+          return lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)';
+        }
+        const s = sellers.find(sel => sel.id === parentId);
+        if (s) return s.name;
+      }
+      
+      return lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)';
+    };
+
+    filteredOrders.forEach(o => {
+      const name = getSupervisorName(o);
+      map[name] = (map[name] || 0) + o.profit;
+    });
+
+    return Object.entries(map).map(([name, profit]) => ({ name, profit }));
+  }, [filteredOrders, lang]);
 
   // Chart 2: Sales by Product
   const salesByProductData = useMemo(() => {
@@ -182,7 +229,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
       { name: t.DELIVERED, value: counts.DELIVERED, color: '#10b981' },
       { name: t.DELAYED, value: counts.DELAYED, color: '#f59e0b' },
       { name: t.REJECTED, value: counts.REJECTED, color: '#ef4444' }
-    ].filter(item => item.value > 0);
+    ];
   }, [filteredOrders, t]);
 
   // Best/Top Sellers list
@@ -277,7 +324,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
 
 
       {/* 1. KEY STATS CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-5">
         
         {/* Total Orders Card */}
         <button 
@@ -291,6 +338,21 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
           </div>
           <div className="p-2 sm:p-2.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 rounded-xl">
             <ShoppingCart className="w-4 h-4 sm:w-5 sm:h-5" />
+          </div>
+        </button>
+
+        {/* Pending Card */}
+        <button 
+          onClick={() => onCardClick?.('PENDING')}
+          id="stat-pending" 
+          className="w-full text-start bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800/90 border-s-4 border-s-indigo-500 rounded-2xl py-3.5 px-4 shadow-xs flex items-center justify-between transition-all duration-200 hover:shadow-md hover:border-indigo-400 dark:hover:border-indigo-500 hover:scale-[1.03] active:scale-95 cursor-pointer focus:outline-hidden"
+        >
+          <div className="space-y-1">
+            <span className="text-[10px] sm:text-[11px] font-extrabold text-indigo-600/95 dark:text-indigo-450 uppercase tracking-wider block">{t.PENDING}</span>
+            <span className="text-xl sm:text-2xl font-black text-slate-800 dark:text-slate-100 block">{stats.pending}</span>
+          </div>
+          <div className="p-2 sm:p-2.5 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-xl">
+            <Timer className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
         </button>
  
@@ -638,6 +700,91 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
           </div>
         )}
 
+        {/* Profits by Supervisor Block (Visible to Admin, Deputy, Supervisor & Seller roles) */}
+        {role !== 'PUBLIC' && (
+          <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-all hover:shadow-md duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
+              <h3 className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
+                <span>🛡️ {lang === 'ar' ? 'الربح حسب المشرف' : 'Profits par Superviseur'}</span>
+              </h3>
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setViewSupervisor('chart')}
+                  className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                    viewSupervisor === 'chart'
+                      ? 'bg-white dark:bg-slate-800 shadow-xs text-blue-600 dark:text-blue-450'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewSupervisor('list')}
+                  className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                    viewSupervisor === 'list'
+                      ? 'bg-white dark:bg-slate-800 shadow-xs text-blue-600 dark:text-blue-450'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-64 sm:min-h-72">
+              {profitBySupervisorData.length === 0 ? (
+                <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
+              ) : viewSupervisor === 'chart' ? (
+                <div className="h-64 sm:h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={profitBySupervisorData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
+                      <defs>
+                        <linearGradient id="colorSupervisorProfit" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.95}/>
+                          <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.35}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.12} vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 'bold' }} angle={-15} textAnchor="end" height={45} tickLine={false} />
+                      <YAxis tick={{ fontSize: 9, fill: '#64748b', fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                      <Tooltip content={<CustomTooltip />} />
+                      <Bar dataKey="profit" name={t.profit} fill="url(#colorSupervisorProfit)" radius={[5, 5, 0, 0]} maxBarSize={35} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="overflow-y-auto max-h-64 sm:max-h-72 space-y-4 pr-1 text-slate-800 dark:text-slate-200">
+                  {[...profitBySupervisorData].sort((a, b) => b.profit - a.profit).map((item, idx) => {
+                    const maxProfit = Math.max(...profitBySupervisorData.map(s => s.profit), 1);
+                    const percent = Math.min(Math.round((item.profit / maxProfit) * 100), 100);
+                    const initials = item.name ? item.name.substring(0, 2) : 'M';
+                    return (
+                      <div key={idx} className="space-y-1.5 text-start">
+                        <div className="flex items-center justify-between gap-3 text-xs">
+                          <span className="font-extrabold text-slate-800 dark:text-slate-100 truncate flex items-center gap-2 min-w-0">
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[10px] text-white shrink-0 bg-blue-600 dark:bg-blue-700`}>
+                              {initials}
+                            </div>
+                            <span className="truncate">{item.name}</span>
+                          </span>
+                          <span className="font-black text-blue-600 dark:text-blue-400 shrink-0">
+                            +{item.profit.toLocaleString()} MAD
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-100 dark:bg-slate-950 h-2.5 rounded-full overflow-hidden">
+                          <div className="bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full h-full transition-all duration-500" style={{ width: `${percent}%` }}></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Sales by City Bar representation */}
         <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-all hover:shadow-md duration-200">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
@@ -718,21 +865,83 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
           </div>
         </div>
 
-        {/* Order status proportion donut chart */}
+        {/* Order status proportion donut & bar chart */}
         <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800/80 rounded-2xl p-5 shadow-xs transition-colors">
-          <h3 className="font-bold text-xs sm:text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider mb-4 border-b border-slate-100 dark:border-slate-800 pb-3 block">
-            📊 {t.orderStatusRatios}
-          </h3>
-          <div className="h-64 sm:h-72 flex flex-col sm:flex-row items-center justify-center gap-6">
-            {statusRatiosData.length === 0 ? (
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3 mb-4">
+            <h3 className="font-extrabold text-xs sm:text-sm text-slate-800 dark:text-slate-100 uppercase tracking-wider flex items-center gap-2">
+              <span>📊 {t.orderStatusRatios}</span>
+            </h3>
+            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setViewStatusChart('bar')}
+                className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                  viewStatusChart === 'bar'
+                    ? 'bg-white dark:bg-slate-800 shadow-xs text-indigo-600 dark:text-indigo-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                }`}
+                title="Bar Chart"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewStatusChart('donut')}
+                className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                  viewStatusChart === 'donut'
+                    ? 'bg-white dark:bg-slate-800 shadow-xs text-indigo-600 dark:text-indigo-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                }`}
+                title="Donut Chart"
+              >
+                <span className="text-[10px] leading-none shrink-0">🍩</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewStatusChart('list')}
+                className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all ${
+                  viewStatusChart === 'list'
+                    ? 'bg-white dark:bg-slate-800 shadow-xs text-indigo-600 dark:text-indigo-400'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700'
+                }`}
+                title="List View"
+              >
+                <List className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div className="min-h-64 sm:min-h-72 flex items-center justify-center">
+            {filteredOrders.length === 0 ? (
               <div className="text-slate-400 italic text-xs">{t.noData}</div>
-            ) : (
-              <>
+            ) : viewStatusChart === 'bar' ? (
+              <div className="h-64 sm:h-72 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={statusRatiosData} margin={{ top: 15, right: 10, left: -25, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.12} vertical={false} />
+                    <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 'bold' }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: '#64748b', fontWeight: 'bold' }} axisLine={false} tickLine={false} />
+                    <Tooltip content={<CustomTooltip />} />
+                    <Bar 
+                      dataKey="value" 
+                      name={lang === 'ar' ? 'عدد الطلبيات' : lang === 'fr' ? 'Commandes' : 'Orders'} 
+                      radius={[6, 6, 0, 0]} 
+                      maxBarSize={35}
+                    >
+                      {statusRatiosData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : viewStatusChart === 'donut' ? (
+              <div className="h-64 sm:h-72 flex flex-col sm:flex-row items-center justify-center gap-6 w-full">
                 <div className="w-1/2 h-40 sm:h-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={statusRatiosData}
+                        data={statusRatiosData.filter(item => item.value > 0)}
                         cx="50%"
                         cy="50%"
                         innerRadius={50}
@@ -740,7 +949,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
                         paddingAngle={4}
                         dataKey="value"
                       >
-                        {statusRatiosData.map((entry, index) => (
+                        {statusRatiosData.filter(item => item.value > 0).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
                         ))}
                       </Pie>
@@ -757,7 +966,30 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
+            ) : (
+              <div className="overflow-y-auto max-h-64 sm:max-h-72 space-y-4 pr-1 text-slate-800 dark:text-slate-200 w-full">
+                {statusRatiosData.map((item, idx) => {
+                  const total = Math.max(filteredOrders.length, 1);
+                  const percent = Math.min(Math.round((item.value / total) * 100), 100);
+                  return (
+                    <div key={idx} className="space-y-1.5 text-start">
+                      <div className="flex items-center justify-between gap-3 text-xs">
+                        <span className="font-extrabold text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: item.color }}></span>
+                          <span>{item.name}</span>
+                        </span>
+                        <span className="font-black text-slate-950 dark:text-slate-100">
+                          {item.value} <span className="text-[10px] text-slate-400 font-bold">({percent}%)</span>
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-950 h-2.5 rounded-full overflow-hidden">
+                        <div className="rounded-full h-full transition-all duration-400" style={{ width: `${percent}%`, backgroundColor: item.color }}></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         </div>

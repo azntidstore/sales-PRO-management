@@ -9,9 +9,10 @@ interface Props {
   role: UserRole;
   onDataChange: () => void;
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  dataTrigger?: number;
 }
 
-export default function ProductsManager({ lang, role, onDataChange, toast }: Props) {
+export default function ProductsManager({ lang, role, onDataChange, toast, dataTrigger }: Props) {
   const t = translations[lang];
   const isReadOnly = role === 'PUBLIC' || role === 'SELLER';
 
@@ -28,7 +29,7 @@ export default function ProductsManager({ lang, role, onDataChange, toast }: Pro
 
   useEffect(() => {
     setProducts(DatabaseService.getProducts());
-  }, []);
+  }, [dataTrigger]);
 
   const resetForm = () => {
     setProductName('');

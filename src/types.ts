@@ -12,6 +12,8 @@ export interface Seller {
   email?: string;
   role?: 'SELLER' | 'SUPERVISOR' | 'DEPUTY' | 'ADMIN';
   parentId?: string; // Administrative leader id
+  parentIds?: string[]; // Multiple administrative leader ids
+  assignedProducts?: string[]; // For supervisors: products they are responsible for
   password?: string; // Stored password fallback for sellers
 }
 
@@ -42,6 +44,7 @@ export interface Order {
   createdBy: string; // e.g. "Admin" or a specific seller
   createdAt: string;
   updatedAt: string;
+  assignedSupervisorId?: string; // Explicitly selected supervisor for sellers with multiple parents
 }
 
 export type Language = 'ar' | 'fr' | 'en';

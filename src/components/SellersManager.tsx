@@ -10,6 +10,7 @@ interface Props {
   currentUser?: string;
   onDataChange: () => void;
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
+  dataTrigger?: number;
 }
 
 const ROLE_RANK: Record<string, number> = {
@@ -20,7 +21,7 @@ const ROLE_RANK: Record<string, number> = {
   'PUBLIC': 0
 };
 
-export default function SellersManager({ lang, role, currentUser, onDataChange, toast }: Props) {
+export default function SellersManager({ lang, role, currentUser, onDataChange, toast, dataTrigger }: Props) {
   const t = translations[lang];
   const isReadOnly = role === 'PUBLIC';
 
@@ -32,6 +33,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   
   const [sellers, setSellers] = useState<Seller[]>([]);
   const [allSellersListFull, setAllSellersListFull] = useState<Seller[]>([]);
+  const [allProducts, setAllProducts] = useState<any[]>([]);
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -44,15 +46,20 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   const [password, setPassword] = useState('');
   const [sellerRole, setSellerRole] = useState<'SELLER' | 'SUPERVISOR' | 'DEPUTY' | 'ADMIN'>('SELLER');
   const [parentId, setParentId] = useState('');
+  const [selectedParentIds, setSelectedParentIds] = useState<string[]>([]);
+  const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
 
   const refreshSellers = () => {
     const rawSellers = DatabaseService.getSellers();
     setAllSellersListFull(rawSellers);
     
+    const rawProducts = DatabaseService.getProducts();
+    setAllProducts(rawProducts);
+    
     if (role === 'SUPERVISOR' && currentUser) {
       const supervisor = rawSellers.find(s => s.name === currentUser);
       if (supervisor) {
-        setSellers(rawSellers.filter(s => s.parentId === supervisor.id));
+        setSellers(rawSellers.filter(s => s.parentId === supervisor.id || s.parentIds?.includes(supervisor.id)));
       } else {
         setSellers([]);
       }
@@ -63,7 +70,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
 
   useEffect(() => {
     refreshSellers();
-  }, [role, currentUser]);
+  }, [role, currentUser, dataTrigger]);
 
   const resetForm = () => {
     setName('');
@@ -73,6 +80,8 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setPassword('');
     setSellerRole('SELLER');
     setParentId('');
+    setSelectedParentIds([]);
+    setSelectedProductIds([]);
     setEditingId(null);
     setIsFormOpen(false);
   };
@@ -97,7 +106,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       return allSellersListFull.filter(s => s.role === 'SUPERVISOR' && s.id !== editingId);
     }
     if (sellerRole === 'SUPERVISOR') {
-      return allSellersListFull.filter(s => s.role === 'DEPUTY' && s.id !== editingId);
+      return allSellersListFull.filter(s => (s.role === 'DEPUTY' || s.role === 'SUPERVISOR') && s.id !== editingId);
     }
     if (sellerRole === 'DEPUTY') {
       return allSellersListFull.filter(s => s.role === 'ADMIN' && s.id !== editingId);
@@ -148,7 +157,9 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           username: finalEmail,
           email: finalEmail,
           role: sellerRole,
-          parentId: sellerRole === 'ADMIN' ? '' : parentId,
+          parentId: sellerRole === 'ADMIN' ? '' : (selectedParentIds[0] || ''),
+          parentIds: sellerRole === 'ADMIN' ? [] : selectedParentIds,
+          assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
           password: assignedPassword
         };
         DatabaseService.saveSellers(fullSellers);
@@ -177,7 +188,9 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
         username: finalEmail,
         email: finalEmail,
         role: sellerRole,
-        parentId: sellerRole === 'ADMIN' ? '' : parentId,
+        parentId: sellerRole === 'ADMIN' ? '' : (selectedParentIds[0] || ''),
+        parentIds: sellerRole === 'ADMIN' ? [] : selectedParentIds,
+        assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
         password: assignedPassword
       };
       fullSellers.push(newSeller);
@@ -207,6 +220,8 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setPassword(seller.password || ''); // Fallback credentials support stored in Firestore document
     setSellerRole(seller.role || 'SELLER');
     setParentId(seller.parentId || '');
+    setSelectedParentIds(seller.parentIds || (seller.parentId ? [seller.parentId] : []));
+    setSelectedProductIds(seller.assignedProducts || []);
     setIsFormOpen(true);
   };
 
@@ -306,13 +321,12 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       : [{ id: 'abdellah', name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)', role: 'ADMIN' as const, phone: '', active: true, createdAt: '' }];
 
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 text-start">
         {directors.map(director => {
           // Find deputies reporting to this director
-          // If director is the virtual 'abdellah', deputies with parentId === '' or false or 'abdellah' can be shown!
           const deputies = dbSellers.filter(s => 
             s.role === 'DEPUTY' && 
-            (s.parentId === director.id || (director.id === 'abdellah' && (!s.parentId || s.parentId === 'abdellah')))
+            (s.parentId === director.id || s.parentIds?.includes(director.id) || (director.id === 'abdellah' && (!s.parentId || s.parentId === 'abdellah' || s.parentIds?.includes('abdellah'))))
           );
 
           return (
@@ -339,7 +353,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 <div className="ms-6 md:ms-10 mt-4 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-6 space-y-4">
                   {deputies.map(deputy => {
                     // Find supervisors reporting to this deputy
-                    const supervisors = dbSellers.filter(s => s.role === 'SUPERVISOR' && s.parentId === deputy.id);
+                    const supervisors = dbSellers.filter(s => s.role === 'SUPERVISOR' && (s.parentId === deputy.id || s.parentIds?.includes(deputy.id)));
 
                     return (
                       <div key={deputy.id} className="relative">
@@ -367,8 +381,12 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                         ) : (
                           <div className="ms-6 md:ms-8 mt-3 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-6 space-y-4">
                             {supervisors.map(supervisor => {
-                              // Find sellers reporting to this supervisor
-                              const assignedSellersList = dbSellers.filter(s => s.role === 'SELLER' && s.parentId === supervisor.id);
+                              // Find sellers reporting to this supervisor (this can be SELLER or SUPERVISOR)
+                              const assignedSellersList = dbSellers.filter(s => 
+                                (s.role === 'SELLER' || s.role === 'SUPERVISOR') && 
+                                s.id !== supervisor.id &&
+                                (s.parentId === supervisor.id || s.parentIds?.includes(supervisor.id))
+                              );
 
                               return (
                                 <div key={supervisor.id} className="relative">
@@ -385,6 +403,13 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                                       <span className="text-[10px] text-amber-700 dark:text-amber-400 font-extrabold block">
                                         {lang === 'ar' ? `مشرف مجموعة (${assignedSellersList.length} بائع)` : `Superviseur (${assignedSellersList.length} vendeurs)`}
                                       </span>
+                                      
+                                      {/* Dual affiliation mark on supervisor card itself */}
+                                      {dbSellers.some(s => s.role === 'SUPERVISOR' && s.id !== supervisor.id && (supervisor.parentId === s.id || supervisor.parentIds?.includes(s.id))) && (
+                                        <span className="inline-block mt-1 text-[8.5px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-955/35 dark:text-indigo-300 border border-indigo-200/50">
+                                          🔄 {lang === 'ar' ? 'بائع لدى مشرف آخر' : 'Vendeur sous un autre superviseur'}
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
 
@@ -395,15 +420,35 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                                     </div>
                                   ) : (
                                     <div className="ms-6 md:ms-8 mt-2 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-5 space-y-1.5 py-1">
-                                      {assignedSellersList.map(item => (
-                                        <div key={item.id} className="relative flex items-center gap-2 text-xs font-semibold py-1 px-3 bg-sky-50/45 dark:bg-sky-955/15 border border-sky-100/40 dark:border-sky-900/25 rounded-lg max-w-sm">
-                                          {/* Tree connector */}
-                                          <div className="absolute top-4.5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-5"></div>
-                                          <span className="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
-                                          <span className="text-slate-705 dark:text-slate-300 font-bold">{item.name}</span>
-                                          <span className="text-[10px] text-slate-400 font-bold">({item.phone || '-'})</span>
-                                        </div>
-                                      ))}
+                                      {assignedSellersList.map(item => {
+                                        const isDualRoleSupervisor = item.role === 'SUPERVISOR';
+                                        
+                                        return (
+                                          <div key={item.id} className={`relative flex items-center gap-2 text-xs font-semibold py-1.5 px-3 rounded-lg max-w-sm ${
+                                            isDualRoleSupervisor 
+                                              ? 'bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/50 dark:border-indigo-900/40 shadow-3xs' 
+                                              : 'bg-sky-50/45 dark:bg-sky-955/15 border border-sky-100/40 dark:border-sky-900/25'
+                                          }`}>
+                                            {/* Tree connector */}
+                                            <div className="absolute top-4.5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-5"></div>
+                                            
+                                            <span className={`w-1.5 h-1.5 rounded-full ${isDualRoleSupervisor ? 'bg-indigo-500 animate-pulse' : 'bg-sky-450'}`}></span>
+                                            
+                                            <div className="flex flex-col">
+                                              <span className={`font-bold ${isDualRoleSupervisor ? 'text-indigo-950 dark:text-indigo-300 font-extrabold' : 'text-slate-705 dark:text-slate-300'}`}>
+                                                {item.name}
+                                              </span>
+                                              {isDualRoleSupervisor && (
+                                                <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-black mt-0.5 flex items-center gap-0.5">
+                                                  🔄 {lang === 'ar' ? 'مشرف مجموعة (يعمل كبائع هنا)' : 'Superviseur (agit comme vendeur)'}
+                                                </span>
+                                              )}
+                                            </div>
+                                            
+                                            <span className="text-[10px] text-slate-400 font-bold ms-auto">({item.phone || '-'})</span>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
@@ -421,14 +466,14 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
         })}
 
         {/* Unattached Sellers (Fault-Tolerance display block) */}
-        {dbSellers.some(s => s.role === 'SELLER' && !s.parentId) && (
+        {dbSellers.some(s => s.role === 'SELLER' && !s.parentId && (!s.parentIds || s.parentIds.length === 0)) && (
           <div className="mt-4 bg-yellow-50/45 dark:bg-yellow-955/10 border border-yellow-250/30 p-4 rounded-xl">
             <h5 className="text-xs font-extrabold text-amber-800 dark:text-amber-500 mb-2 uppercase tracking-wide">
               ⚠️ {lang === 'ar' ? 'بائعون غير مربوطين بمشرف' : 'Vendeurs orphelins (sans superviseur)'}
             </h5>
             <div className="flex flex-wrap gap-2">
               {dbSellers
-                .filter(s => s.role === 'SELLER' && !s.parentId)
+                .filter(s => s.role === 'SELLER' && !s.parentId && (!s.parentIds || s.parentIds.length === 0))
                 .map(item => (
                   <span key={item.id} className="inline-flex items-center gap-1 bg-yellow-100/50 border border-yellow-200/50 text-amber-900 dark:bg-amber-955/20 dark:text-amber-400 rounded-lg px-2.5 py-1 text-xs font-bold">
                     <span>{item.name}</span>
@@ -579,34 +624,102 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           </div>
 
           {sellerRole !== 'ADMIN' && (
-            <div className="mb-4 bg-blue-50/50 dark:bg-blue-950/20 p-4 rounded-xl border border-blue-100/40 dark:border-blue-900/30">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
-                ⭐ {lang === 'ar' ? 'رئيس العمل المباشر (التأطير الإداري)' : 'Responsable d\'équipe supérieur'} *
+            <div className="mb-4 bg-blue-50/50 dark:bg-blue-955/20 p-4 rounded-xl border border-blue-100/40 dark:border-blue-900/30 text-start">
+              <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-2">
+                ⭐ {lang === 'ar' ? 'رؤساء العمل المباشرين (يمكن اختيار أكثر من مشرف)' : 'Responsable(s) d\'équipe supérieur(s) (Multiples possibles)'} *
               </label>
-              <select
-                id="seller-parent-select"
-                value={parentId}
-                required
-                onChange={e => setParentId(e.target.value)}
-                className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-extrabold"
-              >
-                <option value="">{lang === 'ar' ? '-- اختر المسؤول المباشر من القائمة --' : '-- Choisir le supérieur d\'équipe --'}</option>
-                
+              
+              <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5">
+                {/* Deputy reporting to abdellah option */}
                 {sellerRole === 'DEPUTY' && (
-                  <option value="abdellah">👑 عبد الله (المدير العام الأساسي)</option>
+                  <label className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={selectedParentIds.includes('abdellah')}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedParentIds([...selectedParentIds, 'abdellah']);
+                        } else {
+                          setSelectedParentIds(selectedParentIds.filter(id => id !== 'abdellah'));
+                        }
+                      }}
+                      className="rounded-sm text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                    />
+                    <span>👑 عبد الله (المدير العام الأساسي)</span>
+                  </label>
                 )}
 
                 {getEligibleSuperiors().map(sup => (
-                  <option key={sup.id} value={sup.id}>
-                    👤 {sup.name} ({getTranslatedRole(sup.role)})
-                  </option>
+                  <label key={sup.id} className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={selectedParentIds.includes(sup.id)}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedParentIds([...selectedParentIds, sup.id]);
+                        } else {
+                          setSelectedParentIds(selectedParentIds.filter(id => id !== sup.id));
+                        }
+                      }}
+                      className="rounded-sm text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                    />
+                    <span>👤 {sup.name} <span className="text-[10px] text-slate-400 font-normal">({getTranslatedRole(sup.role)})</span></span>
+                  </label>
                 ))}
-              </select>
+
+                {sellerRole !== 'DEPUTY' && getEligibleSuperiors().length === 0 && (
+                  <p className="text-xs text-slate-400 italic p-2 text-center">
+                    {lang === 'ar' ? 'لا يوجد مسؤولون مؤهلون متوفرون' : 'Aucun responsable éligible disponible'}
+                  </p>
+                )}
+              </div>
+
               <p className="text-[10.5px] text-blue-600 dark:text-blue-400 font-bold mt-1.5 flex items-center gap-1">
                 <span>ℹ️</span>
-                {sellerRole === 'SELLER' && (lang === 'ar' ? 'البائع في السلم الهرمي يكون تحت قيادة مشرف المجموعة.' : 'Le vendeur doit rapporter à un superviseur.')}
-                {sellerRole === 'SUPERVISOR' && (lang === 'ar' ? 'المشرف في السلم الهرمي يكون تحت قيادة نائب المدير.' : 'Le superviseur doit rapporter à un adjoint.')}
+                {sellerRole === 'SELLER' && (lang === 'ar' ? 'البائع في السلم الهرمي يكون تحت قيادة مشرف المجموعة (يمكن اختيار أكثر من مشرف).' : 'Le vendeur peut rapporter à un ou plusieurs superviseurs.')}
+                {sellerRole === 'SUPERVISOR' && (lang === 'ar' ? 'المشرف في السلم الهرمي يكون تحت قيادة نائب المدير أو مشرف آخر.' : 'Le superviseur peut rapporter à un adjoint ou à un autre superviseur.')}
                 {sellerRole === 'DEPUTY' && (lang === 'ar' ? 'نائب المدير في السلم الهرمي يكون تحت قيادة المدير العام.' : 'L\'adjoint doit rapporter au Directeur Général.')}
+              </p>
+            </div>
+          )}
+
+          {sellerRole === 'SUPERVISOR' && (
+            <div className="mb-4 bg-indigo-50/50 dark:bg-indigo-950/20 p-4 rounded-xl border border-indigo-100/40 dark:border-indigo-900/30 text-start">
+              <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-2">
+                📦 {lang === 'ar' ? 'المنتوجات المسؤولة عنها (تحديد المنتوجات المشرف عليها)' : 'Produits sous responsabilité (Supervisés)'}
+              </label>
+              
+              <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5">
+                {allProducts.map(p => (
+                  <label key={p.id} className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={selectedProductIds.includes(p.id) || selectedProductIds.includes(p.productName)}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedProductIds([...selectedProductIds, p.id]);
+                        } else {
+                          setSelectedProductIds(selectedProductIds.filter(id => id !== p.id && id !== p.productName));
+                        }
+                      }}
+                      className="rounded-sm text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                    />
+                    <span>📦 {p.productName} <span className="text-[10px] text-slate-400 font-normal">({p.sellingPrice} MAD)</span></span>
+                  </label>
+                ))}
+
+                {allProducts.length === 0 && (
+                  <p className="text-xs text-slate-400 italic p-2 text-center">
+                    {lang === 'ar' ? 'لا توجد منتوجات متوفرة حالياً' : 'Aucun produit disponible'}
+                  </p>
+                )}
+              </div>
+              
+              <p className="text-[10.5px] text-indigo-600 dark:text-indigo-400 font-bold mt-1.5 flex items-center gap-1">
+                <span>ℹ️</span>
+                {lang === 'ar' 
+                  ? 'المشرف سيرى فقط طلبيات البائعين التابعين له للمنتوجات المحددة هنا.' 
+                  : 'Le superviseur ne verra que les commandes des produits sélectionnés ici pour ses vendeurs.'}
               </p>
             </div>
           )}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DatabaseService } from '../dbMock';
 import { translations } from '../locales';
-import { KeyRound, User, LogIn, Sparkles, Globe, Moon, Sun } from 'lucide-react';
+import { KeyRound, User, LogIn, Sparkles, Globe, Moon, Sun, X, ShieldAlert } from 'lucide-react';
 import { Language, UserRole, Seller } from '../types';
 import { db, isFirebaseConfigured } from '../firebase';
 import { collection, getDocs } from 'firebase/firestore';

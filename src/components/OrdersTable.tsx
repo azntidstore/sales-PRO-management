@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Order, Language, UserRole } from '../types';
+import { Order, Language, UserRole, Seller } from '../types';
 import { DatabaseService } from '../dbMock';
 import { translations } from '../locales';
 import { Edit2, Trash2, Search, Filter, Calendar, Download, Eye, ArrowUpDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, CheckCircle2, Clock, Ban, AlertCircle, X } from 'lucide-react';
@@ -14,6 +14,7 @@ interface Props {
   triggerFormOpen: () => void;
   initialStatusFilter?: string | null;
   onClearInitialStatusFilter?: () => void;
+  dataTrigger?: number;
 }
 
 export default function OrdersTable({
@@ -25,7 +26,8 @@ export default function OrdersTable({
   toast,
   triggerFormOpen,
   initialStatusFilter,
-  onClearInitialStatusFilter
+  onClearInitialStatusFilter,
+  dataTrigger
 }: Props) {
   const t = translations[lang];
 
@@ -38,6 +40,7 @@ export default function OrdersTable({
   const [filterSeller, setFilterSeller] = useState('');
   const [filterProduct, setFilterProduct] = useState('');
   const [filterCity, setFilterCity] = useState('');
+  const [filterSupervisor, setFilterSupervisor] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -66,30 +69,183 @@ export default function OrdersTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  useEffect(() => {
+  const getFilteredRoleOrders = (): Order[] => {
     let rawOrders = DatabaseService.getOrders();
     if (role === 'SELLER') {
-      rawOrders = rawOrders.filter(o => o.sellerName === currentUser);
+      return rawOrders.filter(o => o.sellerName === currentUser);
+    } else if (role === 'SUPERVISOR') {
+      const rawSellers = DatabaseService.getSellers();
+      const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
+      if (!currentSellerProfile) {
+        return rawOrders.filter(o => o.sellerName === currentUser);
+      }
+      
+      const childSellers = rawSellers.filter(s => 
+        s.parentId === currentSellerProfile.id || 
+        (s.parentIds && s.parentIds.includes(currentSellerProfile.id))
+      );
+      const childSellerNames = childSellers.map(s => s.name);
+
+      const isProductMatching = (orderProductStr: string, assigned: string[] | undefined) => {
+        if (!assigned || assigned.length === 0) return true;
+        if (assigned.includes(orderProductStr)) return true;
+        const matchedProd = DatabaseService.getProducts().find(p => p.id === orderProductStr || p.productName === orderProductStr);
+        if (matchedProd) {
+          return assigned.includes(matchedProd.id) || assigned.includes(matchedProd.productName);
+        }
+        return false;
+      };
+
+      return rawOrders.filter(o => {
+        if (o.sellerName === currentUser) return true;
+        if (childSellerNames.includes(o.sellerName)) {
+          if (o.assignedSupervisorId) {
+            if (o.assignedSupervisorId !== currentSellerProfile.id) {
+              return false;
+            }
+          }
+          return isProductMatching(o.product, currentSellerProfile.assignedProducts);
+        }
+        return false;
+      });
     }
-    setOrders(rawOrders);
+    return rawOrders;
+  };
+
+  const getAllSupervisors = (): Seller[] => {
+    const sellers = DatabaseService.getSellers();
+    const sups = sellers.filter(s => s.role === 'SUPERVISOR' || s.role === 'ADMIN' || s.role === 'DEPUTY');
+    if (!sups.some(s => s.id === 'admin_1')) {
+      sups.push({
+        id: 'admin_1',
+        name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+        role: 'ADMIN',
+        phone: '',
+        active: true,
+        createdAt: ''
+      });
+    }
+    return sups;
+  };
+
+  const getFilterSupervisors = (): Seller[] => {
+    const sellers = DatabaseService.getSellers();
+    const currentSellerProfile = sellers.find(s => s.name === currentUser);
+
+    // 1. Regular Seller (SELLER)
+    if (role === 'SELLER') {
+      if (!currentSellerProfile) return [];
+      const parentIds = new Set<string>();
+      if (currentSellerProfile.parentId) parentIds.add(currentSellerProfile.parentId);
+      if (currentSellerProfile.parentIds) {
+        currentSellerProfile.parentIds.forEach(id => parentIds.add(id));
+      }
+      return sellers.filter(s => parentIds.has(s.id));
+    }
+
+    // 2. Supervisor (SUPERVISOR)
+    if (role === 'SUPERVISOR') {
+      if (!currentSellerProfile) {
+        return sellers.filter(s => s.role === 'DEPUTY');
+      }
+      const parentIds = new Set<string>();
+      if (currentSellerProfile.parentId) parentIds.add(currentSellerProfile.parentId);
+      if (currentSellerProfile.parentIds) {
+        currentSellerProfile.parentIds.forEach(id => parentIds.add(id));
+      }
+      const results = sellers.filter(s => parentIds.has(s.id) && s.role === 'DEPUTY');
+      if (results.length === 0) {
+        return sellers.filter(s => s.role === 'DEPUTY');
+      }
+      return results;
+    }
+
+    // 3. Deputy Director (DEPUTY)
+    if (role === 'DEPUTY') {
+      const admins = sellers.filter(s => s.role === 'ADMIN');
+      if (!admins.some(s => s.id === 'admin_1')) {
+        admins.push({
+          id: 'admin_1',
+          name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+          role: 'ADMIN',
+          phone: '',
+          active: true,
+          createdAt: ''
+        });
+      }
+      
+      if (!currentSellerProfile) return admins;
+      const parentIds = new Set<string>();
+      if (currentSellerProfile.parentId) parentIds.add(currentSellerProfile.parentId);
+      if (currentSellerProfile.parentIds) {
+        currentSellerProfile.parentIds.forEach(id => parentIds.add(id));
+      }
+      const matchedAdmins = admins.filter(s => parentIds.has(s.id));
+      if (matchedAdmins.length > 0) return matchedAdmins;
+      return admins;
+    }
+
+    // 4. Director (ADMIN)
+    if (role === 'ADMIN') {
+      const admins = sellers.filter(s => s.role === 'ADMIN');
+      const adminGeneral = admins.find(s => s.id === 'admin_1') || {
+        id: 'admin_1',
+        name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+        role: 'ADMIN',
+        phone: '',
+        active: true,
+        createdAt: ''
+      };
+      
+      if (currentUser.includes('عبد الله') || currentUser.includes('Abdellah') || currentSellerProfile?.id === 'admin_1') {
+        return getAllSupervisors();
+      } else {
+        return [adminGeneral];
+      }
+    }
+
+    return getAllSupervisors();
+  };
+
+  const matchesSupervisor = (order: Order, supId: string): boolean => {
+    if (!supId) return true;
+    if (order.assignedSupervisorId) {
+      return order.assignedSupervisorId === supId;
+    }
+    const sellers = DatabaseService.getSellers();
+    const sellerObj = sellers.find(s => s.name === order.sellerName);
+    if (!sellerObj) {
+      return supId === 'admin_1';
+    }
+    if (sellerObj.role === 'SUPERVISOR' || sellerObj.role === 'ADMIN' || sellerObj.role === 'DEPUTY') {
+      return sellerObj.id === supId;
+    }
+    if (sellerObj.parentId) {
+      return sellerObj.parentId === supId;
+    }
+    if (sellerObj.parentIds && sellerObj.parentIds.includes(supId)) {
+      return true;
+    }
+    return supId === 'admin_1';
+  };
+
+  useEffect(() => {
+    const filtered = getFilteredRoleOrders();
+    setOrders(filtered);
 
     // Extract options
-    const slrs = Array.from(new Set(rawOrders.map(o => o.sellerName))).filter(Boolean);
-    const prds = Array.from(new Set(rawOrders.map(o => o.product))).filter(Boolean);
-    const cts = Array.from(new Set(rawOrders.map(o => o.city))).filter(Boolean);
+    const slrs = Array.from(new Set(filtered.map(o => o.sellerName))).filter(Boolean);
+    const prds = Array.from(new Set(filtered.map(o => o.product))).filter(Boolean);
+    const cts = Array.from(new Set(filtered.map(o => o.city))).filter(Boolean);
 
     setUniqueSellers(slrs);
     setUniqueProducts(prds);
     setUniqueCities(cts);
-  }, [role, currentUser]);
+  }, [role, currentUser, dataTrigger]);
 
   // Soft refresh
   const triggerRefresh = () => {
-    let rawOrders = DatabaseService.getOrders();
-    if (role === 'SELLER') {
-      rawOrders = rawOrders.filter(o => o.sellerName === currentUser);
-    }
-    setOrders(rawOrders);
+    setOrders(getFilteredRoleOrders());
   };
 
 
@@ -203,13 +359,31 @@ export default function OrdersTable({
     const phoneMatch = order.phone.includes(searchLower);
     const notesMatch = (order.notes || '').toLowerCase().includes(searchLower);
     const idMatch = order.id.toLowerCase().includes(searchLower);
-    const textMatch = customerMatch || phoneMatch || notesMatch || idMatch;
+
+    // Dynamic supervisor name lookup for search matching
+    const sups = getAllSupervisors();
+    const sellers = DatabaseService.getSellers();
+    const sellerObj = sellers.find(s => s.name === order.sellerName);
+    let supervisorName = '';
+    if (order.assignedSupervisorId) {
+      const supObj = sups.find(s => s.id === order.assignedSupervisorId);
+      if (supObj) supervisorName = supObj.name;
+    } else if (sellerObj) {
+      const parentId = sellerObj.parentId || (sellerObj.parentIds && sellerObj.parentIds[0]);
+      if (parentId) {
+        const supObj = sups.find(s => s.id === parentId);
+        if (supObj) supervisorName = supObj.name;
+      }
+    }
+    const supervisorNameMatch = supervisorName.toLowerCase().includes(searchLower);
+    const textMatch = customerMatch || phoneMatch || notesMatch || idMatch || supervisorNameMatch;
 
     // Filters
     const statusMatch = !filterStatus || order.orderStatus === filterStatus;
     const sellerMatch = !filterSeller || order.sellerName === filterSeller;
     const productMatch = !filterProduct || order.product === filterProduct;
     const cityMatch = !filterCity || order.city === filterCity;
+    const supervisorMatch = matchesSupervisor(order, filterSupervisor);
 
     // Date range
     let dateMatch = true;
@@ -220,7 +394,7 @@ export default function OrdersTable({
       dateMatch = dateMatch && order.orderDate <= endDate;
     }
 
-    return textMatch && statusMatch && sellerMatch && productMatch && cityMatch && dateMatch;
+    return textMatch && statusMatch && sellerMatch && productMatch && cityMatch && supervisorMatch && dateMatch;
   });
 
   // Sorting Logic
@@ -396,12 +570,13 @@ export default function OrdersTable({
     setFilterSeller('');
     setFilterProduct('');
     setFilterCity('');
+    setFilterSupervisor('');
     setStartDate('');
     setEndDate('');
     toast(lang === 'ar' ? 'تم مسح الفلاتر بنجاح' : 'Filtres effacés', 'info');
   };
 
-  const hasActiveFilters = !!(searchText || filterStatus || filterSeller || filterProduct || filterCity || startDate || endDate);
+  const hasActiveFilters = !!(searchText || filterStatus || filterSeller || filterProduct || filterCity || filterSupervisor || startDate || endDate);
 
   return (
     <div id="orders-table-wrapper" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs transition-colors p-6">
@@ -428,7 +603,7 @@ export default function OrdersTable({
           >
             <div className="relative">
               <Filter className="w-4 h-4" />
-              {!!(searchText || filterStatus || filterSeller || filterProduct || filterCity || startDate || endDate) && (
+              {!!(searchText || filterStatus || filterSeller || filterProduct || filterCity || filterSupervisor || startDate || endDate) && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-bounce"></span>
               )}
             </div>
@@ -517,6 +692,13 @@ export default function OrdersTable({
             <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
               <span>{t.city}: {filterCity}</span>
               <button onClick={() => setFilterCity('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
+            </span>
+          )}
+
+          {filterSupervisor && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold border border-blue-200/50 dark:border-blue-800/40">
+              <span>{lang === 'ar' ? 'المشرف' : 'Superviseur'}: {getAllSupervisors().find(s => s.id === filterSupervisor)?.name || filterSupervisor}</span>
+              <button onClick={() => setFilterSupervisor('')} className="hover:text-red-500 cursor-pointer p-0.5"><X className="w-3.5 h-3.5" /></button>
             </span>
           )}
 
@@ -617,6 +799,22 @@ export default function OrdersTable({
             <option value="">{t.filterByCity}</option>
             {uniqueCities.map(c => (
               <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Supervisor filter */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 dark:text-slate-400 mb-1.5">{lang === 'ar' ? 'المشرف المسؤول' : 'Superviseur'}</label>
+          <select
+            id="filter-supervisor-select"
+            value={filterSupervisor}
+            onChange={e => setFilterSupervisor(e.target.value)}
+            className="w-full text-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-850 dark:text-slate-150 focus:outline-hidden focus:ring-1 focus:ring-blue-500 cursor-pointer"
+          >
+            <option value="">{lang === 'ar' ? '-- اختر المشرف --' : '-- Choisir le superviseur --'}</option>
+            {getFilterSupervisors().map(sup => (
+              <option key={sup.id} value={sup.id}>{sup.name}</option>
             ))}
           </select>
         </div>
@@ -847,7 +1045,7 @@ export default function OrdersTable({
                             </span>
                           )}
 
-                          {(role === 'ADMIN' || role === 'DEPUTY') && (
+                          {(role === 'ADMIN' || role === 'DEPUTY' || role === 'SUPERVISOR') && (
                             <button
                               id={`delete-order-${order.id}`}
                               onClick={() => handleDeleteOrder(order.id, order.sellerName)}

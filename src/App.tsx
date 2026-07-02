@@ -111,16 +111,35 @@ export default function App() {
         return userRole === 'DEPUTY'; // Fallback if creator is not found
       }
 
-      // Traversal to find all ancestor leaders up the chain
-      const ancestors: string[] = [];
-      let curr = creatorProfile;
-      while (curr && curr.parentId) {
-        ancestors.push(curr.parentId);
-        curr = rawSellers.find(s => s.id === curr.parentId);
+      // Traversal to find all ancestor leaders up the chain (supporting multi-parents)
+      const ancestors = new Set<string>();
+      const queue = [creatorProfile];
+      const visited = new Set<string>([creatorProfile.id]);
+
+      while (queue.length > 0) {
+        const currNode = queue.shift()!;
+        if (currNode.parentId) {
+          ancestors.add(currNode.parentId);
+          if (!visited.has(currNode.parentId)) {
+            visited.add(currNode.parentId);
+            const parent = rawSellers.find(s => s.id === currNode.parentId);
+            if (parent) queue.push(parent);
+          }
+        }
+        if (currNode.parentIds) {
+          currNode.parentIds.forEach(pId => {
+            ancestors.add(pId);
+            if (!visited.has(pId)) {
+              visited.add(pId);
+              const parent = rawSellers.find(s => s.id === pId);
+              if (parent) queue.push(parent);
+            }
+          });
+        }
       }
 
       // The logged-in user can see it if they are an administrative leader in the creator's path
-      return ancestors.includes(currentSellerProfile.id);
+      return ancestors.has(currentSellerProfile.id);
     }
 
     return false;
@@ -276,11 +295,44 @@ export default function App() {
   let orders = rawOrders;
   if (userRole === 'SELLER') {
     orders = rawOrders.filter(o => o.sellerName === currentUser);
-  } else if (userRole === 'SUPERVISOR' && currentSellerProfile) {
-    const childSellerNames = rawSellers
-      .filter(s => s.parentId === currentSellerProfile.id)
-      .map(s => s.name);
-    orders = rawOrders.filter(o => o.sellerName === currentUser || childSellerNames.includes(o.sellerName));
+  } else if (userRole === 'SUPERVISOR') {
+    if (!currentSellerProfile) {
+      orders = rawOrders.filter(o => o.sellerName === currentUser);
+    } else {
+      const childSellers = rawSellers.filter(s => 
+        s.parentId === currentSellerProfile.id || 
+        (s.parentIds && s.parentIds.includes(currentSellerProfile.id))
+      );
+      const childSellerNames = childSellers.map(s => s.name);
+
+      // Multi-supervisor product assignment matching logic
+      const isProductMatching = (orderProductStr: string, assigned: string[] | undefined) => {
+        if (!assigned || assigned.length === 0) return true;
+        if (assigned.includes(orderProductStr)) return true;
+        const matchedProd = DatabaseService.getProducts().find(p => p.id === orderProductStr || p.productName === orderProductStr);
+        if (matchedProd) {
+          return assigned.includes(matchedProd.id) || assigned.includes(matchedProd.productName);
+        }
+        return false;
+      };
+
+      orders = rawOrders.filter(o => {
+        // Supervisor can always see their own orders (even if they acts as a seller)
+        if (o.sellerName === currentUser) return true;
+        // Supervisor can see a child seller's order ONLY if:
+        // 1. It belongs to this supervisor (if assignedSupervisorId is specified)
+        // 2. The order's product belongs to this supervisor's assigned products
+        if (childSellerNames.includes(o.sellerName)) {
+          if (o.assignedSupervisorId) {
+            if (o.assignedSupervisorId !== currentSellerProfile.id) {
+              return false;
+            }
+          }
+          return isProductMatching(o.product, currentSellerProfile.assignedProducts);
+        }
+        return false;
+      });
+    }
   }
 
   if (!isLoggedIn) {
@@ -766,7 +818,7 @@ export default function App() {
           <div className="flex-1 overflow-y-auto p-6 pb-28 space-y-8">
             
             {/* TABS VIEW CONTROLLER */}
-            <div key={dataTrigger} className="space-y-6">
+            <div className="space-y-6">
               {activeTab === 'dashboard' && (
                 <Dashboard 
                   lang={lang} 
@@ -790,6 +842,7 @@ export default function App() {
                   triggerFormOpen={initAddOrder}
                   initialStatusFilter={initialStatusFilter}
                   onClearInitialStatusFilter={() => setInitialStatusFilter(null)}
+                  dataTrigger={dataTrigger}
                 />
               )}
 
@@ -799,6 +852,7 @@ export default function App() {
                   role={userRole}
                   onDataChange={refreshAllData}
                   toast={addToast}
+                  dataTrigger={dataTrigger}
                 />
               )}
 
@@ -809,6 +863,7 @@ export default function App() {
                   currentUser={currentUser}
                   onDataChange={refreshAllData}
                   toast={addToast}
+                  dataTrigger={dataTrigger}
                 />
               )}
             </div>
