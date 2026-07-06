@@ -198,13 +198,19 @@ export class DatabaseService {
   }
 
   static async saveSellers(sellers: Seller[]): Promise<void> {
+    const oldSellers = [...cacheSellers];
     cacheSellers = sellers;
     saveLocal('sellers', sellers);
     if (isFirebaseConfigured) {
       try {
-        await Promise.all(sellers.map(s => FirestoreService.saveSeller(s)));
+        const newIds = new Set(sellers.map(s => s.id));
+        const deleted = oldSellers.filter(s => !newIds.has(s.id));
+        await Promise.all([
+          ...sellers.map(s => FirestoreService.saveSeller(s)),
+          ...deleted.map(s => FirestoreService.deleteSeller(s.id))
+        ]);
       } catch (err) {
-        console.error('Failed to save sellers to Firestore:', err);
+        console.error('Failed to save sellers/sync deletions to Firestore:', err);
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -215,13 +221,19 @@ export class DatabaseService {
   }
 
   static async saveProducts(products: Product[]): Promise<void> {
+    const oldProducts = [...cacheProducts];
     cacheProducts = products;
     saveLocal('products', products);
     if (isFirebaseConfigured) {
       try {
-        await Promise.all(products.map(p => FirestoreService.saveProduct(p)));
+        const newIds = new Set(products.map(p => p.id));
+        const deleted = oldProducts.filter(p => !newIds.has(p.id));
+        await Promise.all([
+          ...products.map(p => FirestoreService.saveProduct(p)),
+          ...deleted.map(p => FirestoreService.deleteProduct(p.id))
+        ]);
       } catch (err) {
-        console.error('Failed to save products to Firestore:', err);
+        console.error('Failed to save products/sync deletions to Firestore:', err);
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -232,13 +244,19 @@ export class DatabaseService {
   }
 
   static async saveOrders(orders: Order[]): Promise<void> {
+    const oldOrders = [...cacheOrders];
     cacheOrders = orders;
     saveLocal('orders', orders);
     if (isFirebaseConfigured) {
       try {
-        await Promise.all(orders.map(o => FirestoreService.saveOrder(o)));
+        const newIds = new Set(orders.map(o => o.id));
+        const deleted = oldOrders.filter(o => !newIds.has(o.id));
+        await Promise.all([
+          ...orders.map(o => FirestoreService.saveOrder(o)),
+          ...deleted.map(o => FirestoreService.deleteOrder(o.id))
+        ]);
       } catch (err) {
-        console.error('Failed to save orders to Firestore:', err);
+        console.error('Failed to save orders/sync deletions to Firestore:', err);
       }
     }
     if (onChangeCallback) onChangeCallback();
