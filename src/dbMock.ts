@@ -209,10 +209,10 @@ export class DatabaseService {
           ...sellers.map(s => FirestoreService.saveSeller(s)),
           ...deleted.map(s => FirestoreService.deleteSeller(s.id))
         ]);
-        FirestoreService.reportError(null);
+        FirestoreService.reportError('sellers_write', null);
       } catch (err: any) {
         console.error('Failed to save sellers/sync deletions to Firestore:', err);
-        FirestoreService.reportError(err?.message || String(err));
+        FirestoreService.reportError('sellers_write', err?.message || String(err));
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -234,10 +234,10 @@ export class DatabaseService {
           ...products.map(p => FirestoreService.saveProduct(p)),
           ...deleted.map(p => FirestoreService.deleteProduct(p.id))
         ]);
-        FirestoreService.reportError(null);
+        FirestoreService.reportError('products_write', null);
       } catch (err: any) {
         console.error('Failed to save products/sync deletions to Firestore:', err);
-        FirestoreService.reportError(err?.message || String(err));
+        FirestoreService.reportError('products_write', err?.message || String(err));
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -259,10 +259,10 @@ export class DatabaseService {
           ...orders.map(o => FirestoreService.saveOrder(o)),
           ...deleted.map(o => FirestoreService.deleteOrder(o.id))
         ]);
-        FirestoreService.reportError(null);
+        FirestoreService.reportError('orders_write', null);
       } catch (err: any) {
         console.error('Failed to save orders/sync deletions to Firestore:', err);
-        FirestoreService.reportError(err?.message || String(err));
+        FirestoreService.reportError('orders_write', err?.message || String(err));
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -278,10 +278,10 @@ export class DatabaseService {
     if (isFirebaseConfigured) {
       try {
         await Promise.all(logs.map(log => FirestoreService.saveSyncLog(log)));
-        FirestoreService.reportError(null);
+        FirestoreService.reportError('logs_write', null);
       } catch (err: any) {
         console.error('Failed to save sync logs to Firestore:', err);
-        FirestoreService.reportError(err?.message || String(err));
+        FirestoreService.reportError('logs_write', err?.message || String(err));
       }
     }
     if (onChangeCallback) onChangeCallback();
@@ -297,10 +297,10 @@ export class DatabaseService {
     if (isFirebaseConfigured) {
       try {
         await FirestoreService.saveSheetsConfig(config);
-        FirestoreService.reportError(null);
+        FirestoreService.reportError('settings_write', null);
       } catch (err: any) {
         console.error('Failed to save sheets configuration to Firestore:', err);
-        FirestoreService.reportError(err?.message || String(err));
+        FirestoreService.reportError('settings_write', err?.message || String(err));
       }
     }
     if (onChangeCallback) onChangeCallback();

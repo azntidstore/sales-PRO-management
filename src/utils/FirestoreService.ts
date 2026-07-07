@@ -25,6 +25,7 @@ const SEED_LOGS: SheetsSyncLog[] = [];
 
 export class FirestoreService {
   static lastError: string | null = null;
+  static activeErrors: Map<string, string> = new Map();
   static onErrorCallbacks: Set<(err: string | null) => void> = new Set();
 
   static onConnectionError(cb: (err: string | null) => void) {
@@ -35,9 +36,17 @@ export class FirestoreService {
     };
   }
 
-  static reportError(msg: string | null) {
-    this.lastError = msg;
-    this.onErrorCallbacks.forEach(cb => cb(msg));
+  static reportError(source: string, msg: string | null) {
+    if (msg) {
+      this.activeErrors.set(source, msg);
+    } else {
+      this.activeErrors.delete(source);
+    }
+    const combinedError = this.activeErrors.size > 0 
+      ? Array.from(this.activeErrors.values()).join(' | ') 
+      : null;
+    this.lastError = combinedError;
+    this.onErrorCallbacks.forEach(cb => cb(combinedError));
   }
 
   // Check if uninitialized and seed the database once
@@ -94,7 +103,7 @@ export class FirestoreService {
   static onSellersChange(callback: (sellers: Seller[]) => void) {
     const q = collection(db, 'sellers');
     return onSnapshot(q, (snapshot) => {
-      FirestoreService.reportError(null);
+      FirestoreService.reportError('sellers_read', null);
       if (snapshot.empty) {
         // Run seed synchronously inside background
         this.verifyAndSeedDatabase();
@@ -108,7 +117,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Sellers snapshot subscription status:', error.message);
-      FirestoreService.reportError(error.message);
+      FirestoreService.reportError('sellers_read', error.message);
     });
   }
 
@@ -134,7 +143,7 @@ export class FirestoreService {
   static onProductsChange(callback: (products: Product[]) => void) {
     const q = collection(db, 'products');
     return onSnapshot(q, (snapshot) => {
-      FirestoreService.reportError(null);
+      FirestoreService.reportError('products_read', null);
       if (snapshot.empty) {
         callback([]);
       } else {
@@ -146,7 +155,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Products snapshot subscription status:', error.message);
-      FirestoreService.reportError(error.message);
+      FirestoreService.reportError('products_read', error.message);
     });
   }
 
@@ -162,7 +171,7 @@ export class FirestoreService {
   static onOrdersChange(callback: (orders: Order[]) => void) {
     const q = collection(db, 'orders');
     return onSnapshot(q, (snapshot) => {
-      FirestoreService.reportError(null);
+      FirestoreService.reportError('orders_read', null);
       if (snapshot.empty) {
         callback([]);
       } else {
@@ -176,7 +185,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Orders snapshot subscription status:', error.message);
-      FirestoreService.reportError(error.message);
+      FirestoreService.reportError('orders_read', error.message);
     });
   }
 
