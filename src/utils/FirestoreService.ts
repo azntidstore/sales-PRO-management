@@ -102,6 +102,16 @@ export class FirestoreService {
     await deleteDoc(doc(db, 'sellers', id));
   }
 
+  static async getSellersOnce(): Promise<Seller[]> {
+    const q = collection(db, 'sellers');
+    const snapshot = await getDocs(q);
+    const list: Seller[] = [];
+    snapshot.forEach((doc) => {
+      list.push(doc.data() as Seller);
+    });
+    return list;
+  }
+
   // --- Products Actions ---
   static onProductsChange(callback: (products: Product[]) => void) {
     const q = collection(db, 'products');

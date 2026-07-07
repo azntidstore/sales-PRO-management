@@ -1,8 +1,67 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Catch-all safety net: Deny all operations by default
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper to validate alphanumeric and hyphenated document IDs
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Sellers Collection
+    match /sellers/{sellerId} {
+      allow read: if true;
+      allow create, update: if isValidId(sellerId) 
+        && request.resource.data.id == sellerId
+        && request.resource.data.name is string && request.resource.data.name.size() <= 128
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30;
+      allow delete: if true;
+    }
+
+    // Products Collection
+    match /products/{productId} {
+      allow read: if true;
+      allow create, update: if isValidId(productId)
+        && request.resource.data.id == productId
+        && request.resource.data.productName is string && request.resource.data.productName.size() <= 200;
+      allow delete: if true;
+    }
+
+    // Orders Collection
+    match /orders/{orderId} {
+      allow read: if true;
+      allow create, update: if isValidId(orderId)
+        && request.resource.data.id == orderId
+        && request.resource.data.customerName is string && request.resource.data.customerName.size() <= 128;
+      allow delete: if true;
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update: if isValidId(notificationId)
+        && request.resource.data.id == notificationId
+        && request.resource.data.creatorName is string && request.resource.data.creatorName.size() <= 128;
+      allow delete: if true;
+    }
+
+    // SyncLogs Collection
+    match /syncLogs/{logId} {
+      allow read: if true;
+      allow create, update: if isValidId(logId)
+        && request.resource.data.id == logId;
+      allow delete: if true;
+    }
+
+    // Settings Collection
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update: if isValidId(settingId);
+      allow delete: if true;
     }
   }
 }

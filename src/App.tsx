@@ -4,6 +4,7 @@ import { Order, Language, UserRole, AppNotification } from './types';
 import { translations } from './locales';
 import { safeStorage } from './utils/safeStorage';
 import { FirestoreService } from './utils/FirestoreService';
+import { isFirebaseConfigured } from './firebase';
 
 import SellersManager from './components/SellersManager';
 import ProductsManager from './components/ProductsManager';
@@ -176,7 +177,7 @@ export default function App() {
 
   // Listen to real-time notifications
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || !isFirebaseConfigured) return;
 
     let initialLoadDone = false;
     const mountTime = Date.now();

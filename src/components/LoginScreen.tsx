@@ -67,11 +67,19 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
     try {
       let matchedSeller: Seller | undefined;
 
-      const sellers = DatabaseService.getSellers();
+      let sellers = DatabaseService.getSellers();
 
       // Ensure default/seeded records exist first if online
       if (isFirebaseConfigured) {
         await FirestoreService.verifyAndSeedDatabase();
+        try {
+          const freshSellers = await FirestoreService.getSellersOnce();
+          if (freshSellers && freshSellers.length > 0) {
+            sellers = freshSellers;
+          }
+        } catch (fetchErr) {
+          console.warn("Failed to fetch fresh sellers directly from Firestore, falling back to cache:", fetchErr);
+        }
       }
 
       // Flexible lookup: Match either against the email, the username, or the name with multiple fallback combinations
