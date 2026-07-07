@@ -84,6 +84,16 @@ export default function App() {
     return Number(safeStorage.getItem('crm_lastViewedNotificationTime') || '0');
   });
 
+  const [firestoreError, setFirestoreError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    const unsub = FirestoreService.onConnectionError((err) => {
+      setFirestoreError(err);
+    });
+    return () => unsub();
+  }, []);
+
   const rawOrders = DatabaseService.getOrders();
   const rawSellers = DatabaseService.getSellers();
   const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
@@ -817,6 +827,87 @@ export default function App() {
 
           {/* DYNAMIC SCROLLABLE BODY CONTENT CONTAINER */}
           <div className="flex-1 overflow-y-auto p-6 pb-28 space-y-8">
+            
+            {/* FIREBASE CONNECTION DIAGNOSTIC MONITOR */}
+            {!isFirebaseConfigured ? (
+              <div className="bg-amber-50 dark:bg-amber-955/10 border border-amber-200 dark:border-amber-900/30 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xs">
+                <div className="flex gap-3">
+                  <div className="p-2 bg-amber-100 dark:bg-amber-950/60 rounded-xl text-amber-600 dark:text-amber-400 shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-amber-800 dark:text-amber-300">
+                      ⚠️ {lang === 'ar' ? 'وضع العمل المحلي (غير متصل بالسحابة)' : 'Mode Local Uniquement (Non Synchronisé)'}
+                    </h4>
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1 leading-relaxed text-start">
+                      {lang === 'ar' 
+                        ? 'لم يتم تهيئة متغيرات البيئة لـ Firebase في Vercel بشكل كامل بعد أو لم تقم بإعادة بناء المشروع (Redeploy). البيانات تُحفظ حالياً محلياً على هذا الجهاز فقط ولن تظهر في الأجهزة الأخرى.' 
+                        : 'Les variables d’environnement Firebase ne sont pas encore configurées sur Vercel, ou vous n’avez pas reconstruit l’application (Redeploy). Les données sont stockées localement sur cet appareil.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 px-3 py-1.5 rounded-lg font-bold shrink-0 self-end md:self-center">
+                  {lang === 'ar' ? 'يحتاج إلى تهيئة Vercel + Redeploy' : 'Config Vercel + Redeploy Requis'}
+                </div>
+              </div>
+            ) : firestoreError ? (
+              <div className="bg-rose-50 dark:bg-rose-955/20 border border-rose-250 dark:border-rose-900/40 rounded-2xl p-4 flex flex-col items-start gap-3 shadow-2xs">
+                <div className="flex gap-3 w-full">
+                  <div className="p-2 bg-rose-100 dark:bg-rose-950/60 rounded-xl text-rose-600 dark:text-rose-400 shrink-0">
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-black text-rose-800 dark:text-rose-350 text-start">
+                      🚨 {lang === 'ar' ? 'تم حظر اتصال المزامنة السحابية' : 'Accès à la synchronisation Cloud bloqué'}
+                    </h4>
+                    <p className="text-[11px] text-rose-600 dark:text-rose-400 font-bold mt-1 leading-relaxed text-start">
+                      {lang === 'ar'
+                        ? `قامت قاعدة بيانات Firestore برفض الطلب بسبب قيود الصلاحيات: "${firestoreError}". هذا يعني أن قواعد الحماية في Firebase (Firestore Rules) تمنع الوصول للبيانات.`
+                        : `Le serveur Firestore a rejeté la requête : "${firestoreError}". Veuillez mettre à jour vos règles de sécurité.`}
+                    </p>
+                    <div className="mt-3 text-[10px] bg-white/70 dark:bg-slate-950/70 border border-rose-200 dark:border-rose-900/30 p-2.5 rounded-xl space-y-1 text-slate-650 dark:text-slate-400 font-semibold leading-normal text-start">
+                      <p className="font-bold text-rose-700 dark:text-rose-300">💡 {lang === 'ar' ? 'حل المشكلة لتفعيل المزامنة الفورية بين الأجهزة:' : 'Comment résoudre ce problème pour activer la synchronisation :'}</p>
+                      <ul className="list-disc list-inside space-y-1.5 mt-1">
+                        {lang === 'ar' ? (
+                          <>
+                            <li>افتح لوحة تحكم <strong>Firebase Console</strong> الخاصة بك.</li>
+                            <li>انتقل إلى <strong>Firestore Database</strong> ثم تبويب <strong>Rules</strong>.</li>
+                            <li>قم بتعديل القواعد لتسمح بالقراءة والكتابة للجميع: <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code></li>
+                            <li>اضغط على <strong>Publish</strong> وستبدأ المزامنة على كافة الأجهزة فوراً!</li>
+                          </>
+                        ) : (
+                          <>
+                            <li>Allez sur votre <strong>Firebase Console</strong>.</li>
+                            <li>Sous <strong>Firestore Database</strong>, allez dans l’onglet <strong>Rules</strong>.</li>
+                            <li>Autorisez l’accès temporairement en modifiant la règle : <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code></li>
+                            <li>Cliquez sur <strong>Publish</strong> pour activer la synchronisation instantanée.</li>
+                          </>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-emerald-50/50 dark:bg-emerald-955/10 border border-emerald-100/50 dark:border-emerald-900/20 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                  </span>
+                  <span className="text-[11px] font-bold text-emerald-800 dark:text-emerald-450">
+                    {lang === 'ar' ? 'مزامنة السحاب نشطة ومتصلة بـ Firebase بنجاح' : 'Synchronisation Cloud Active et Connectée à Firebase'}
+                  </span>
+                </div>
+                <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500">
+                  {lang === 'ar' ? 'جميع الأجهزة متزامنة' : 'Tous les appareils synchronisés'}
+                </span>
+              </div>
+            )}
             
             {/* TABS VIEW CONTROLLER */}
             <div className="space-y-6">

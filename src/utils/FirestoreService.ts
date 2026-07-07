@@ -24,6 +24,22 @@ const SEED_ORDERS: Order[] = [];
 const SEED_LOGS: SheetsSyncLog[] = [];
 
 export class FirestoreService {
+  static lastError: string | null = null;
+  static onErrorCallbacks: Set<(err: string | null) => void> = new Set();
+
+  static onConnectionError(cb: (err: string | null) => void) {
+    this.onErrorCallbacks.add(cb);
+    cb(this.lastError);
+    return () => {
+      this.onErrorCallbacks.delete(cb);
+    };
+  }
+
+  static reportError(msg: string | null) {
+    this.lastError = msg;
+    this.onErrorCallbacks.forEach(cb => cb(msg));
+  }
+
   // Check if uninitialized and seed the database once
   static async verifyAndSeedDatabase() {
     try {
@@ -78,6 +94,7 @@ export class FirestoreService {
   static onSellersChange(callback: (sellers: Seller[]) => void) {
     const q = collection(db, 'sellers');
     return onSnapshot(q, (snapshot) => {
+      FirestoreService.reportError(null);
       if (snapshot.empty) {
         // Run seed synchronously inside background
         this.verifyAndSeedDatabase();
@@ -91,6 +108,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Sellers snapshot subscription status:', error.message);
+      FirestoreService.reportError(error.message);
     });
   }
 
@@ -116,6 +134,7 @@ export class FirestoreService {
   static onProductsChange(callback: (products: Product[]) => void) {
     const q = collection(db, 'products');
     return onSnapshot(q, (snapshot) => {
+      FirestoreService.reportError(null);
       if (snapshot.empty) {
         callback([]);
       } else {
@@ -127,6 +146,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Products snapshot subscription status:', error.message);
+      FirestoreService.reportError(error.message);
     });
   }
 
@@ -142,6 +162,7 @@ export class FirestoreService {
   static onOrdersChange(callback: (orders: Order[]) => void) {
     const q = collection(db, 'orders');
     return onSnapshot(q, (snapshot) => {
+      FirestoreService.reportError(null);
       if (snapshot.empty) {
         callback([]);
       } else {
@@ -155,6 +176,7 @@ export class FirestoreService {
       }
     }, (error) => {
       console.warn('Orders snapshot subscription status:', error.message);
+      FirestoreService.reportError(error.message);
     });
   }
 

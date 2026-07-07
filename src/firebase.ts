@@ -13,7 +13,6 @@ const firebaseConfig = {
 // Identify if standard Firebase environment variables or real credentials are actively configured
 export const isFirebaseConfigured = !!(
   firebaseConfig.apiKey &&
-  firebaseConfig.apiKey.startsWith('AIzaSy') &&
   firebaseConfig.projectId &&
   firebaseConfig.projectId !== 'your-project-id' &&
   firebaseConfig.projectId !== 'dummy-project-id' &&
