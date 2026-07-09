@@ -1,6 +1,6 @@
 {
-  "name": "Bilingual Sales Manager",
-  "description": "An elegant, multi-lingual CRM and sales manager with interactive dashboards, local and cloud-sync fallback database, offline support, and role-based permissions in Arabic, French, and English.",
+  "name": "Parcel Layout Designer",
+  "description": "A professional GIS Parcel Layout Designer for generating cadastre plans, coordinates, and PDF maps ready for Electron packaging.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
