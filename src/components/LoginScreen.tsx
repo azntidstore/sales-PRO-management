@@ -14,9 +14,10 @@ interface Props {
   toast: (msg: string, type: 'success' | 'error' | 'info') => void;
   darkMode: boolean;
   setDarkMode: (val: boolean) => void;
+  firestoreError?: string | null;
 }
 
-export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, setDarkMode }: Props) {
+export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, setDarkMode, firestoreError }: Props) {
   const [usernameInput, setUsernameInput] = useState('');
   const [passcodeInput, setPasscodeInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -213,6 +214,36 @@ export default function LoginScreen({ lang, setLang, onLogin, toast, darkMode, s
             }
           </p>
         </div>
+
+        {firestoreError && (
+          <div className="mb-4 p-3 bg-red-55 dark:bg-red-955/20 border border-red-200 dark:border-red-900/40 rounded-xl flex items-start gap-2.5">
+            <ShieldAlert className="w-4 h-4 text-red-605 dark:text-red-400 mt-0.5 shrink-0" />
+            <div className="flex-1 text-xs text-start">
+              <p className="font-extrabold text-red-800 dark:text-red-300">
+                {lang === 'ar' ? '⚠️ خطأ في الاتصال بالسحابة (Firestore)' : '⚠️ Erreur de connexion Firestore'}
+              </p>
+              <p className="text-[11px] text-red-650 dark:text-red-400 font-bold mt-1 leading-relaxed">
+                {firestoreError}
+              </p>
+              <div className="mt-2 text-[10px] space-y-1.5 text-slate-500 dark:text-slate-450 leading-normal font-semibold">
+                <p className="font-bold text-red-700 dark:text-red-300">💡 {lang === 'ar' ? 'السبب المحتمل والحلول:' : 'Origines & solutions possibles :'}</p>
+                <ul className="list-disc list-inside space-y-1">
+                  {lang === 'ar' ? (
+                    <>
+                      <li>أدخلت متغيرات بيئة خاطئة أو بها علامات اقتباس مزدوجة في Vercel.</li>
+                      <li>قواعد حماية Firestore تمنع الوصول. تأكد من تفعيل <code className="bg-slate-100 dark:bg-slate-850 px-1 py-0.5 rounded text-[9px] font-mono text-rose-600">allow read, write: if true;</code> مؤقتاً للتجربة.</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>Les variables d’environnement saisies sur Vercel contiennent des guillemets.</li>
+                      <li>Les règles Firestore bloquent l’accès. Activez temporairement <code className="bg-slate-100 dark:bg-slate-850 px-1 py-0.5 rounded text-[9px] font-mono text-rose-600">allow read, write: if true;</code> pour tester.</li>
+                    </>
+                  )}
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleFormSubmit} className="space-y-4">
           {/* Email / Username Input */}

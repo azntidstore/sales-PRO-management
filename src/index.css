@@ -1,90 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
-@import "leaflet/dist/leaflet.css";
 
-/* Precise custom theme typography overrides */
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-sans: "Cairo", "Inter", ui-sans-serif, system-ui, sans-serif;
 }
 
-/* Print CSS Media query to allow multi-page high-fidelity printing with accurate sizes */
-@media print {
-  @page {
-    size: auto;
-    margin: 0mm !important;
-  }
-  
-  body, html, #root, #root > div {
-    background-color: #ffffff !important;
-    background: #ffffff !important;
-    color: #1c1917 !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    width: auto !important;
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  /* Separate pages using native page-break declarations was disabled to merge sheets into a single-board layout */
-  .page-print-container {
-    display: flex !important;
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-    box-shadow: none !important;
-    border-style: double !important;
-    margin: 0 !important;
-    padding: 24px !important;
-    background: #ffffff !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-  
-  /* Reset outer layouts in general workspace editor when printing to prevent dark areas */
-  .bg-slate-900, .bg-stone-100, .bg-emerald-950, .min-h-screen {
-    background: #ffffff !important;
-    background-color: #ffffff !important;
-    color: #171717 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    min-height: 0 !important;
-    border: none !important;
-    box-shadow: none !important;
-  }
-  
-  /* Suppress browser side menus, sidebars, interactive controls & floating buttons */
-  .print\:hidden {
-    display: none !important;
-  }
-
-  /* Force background graphic colors, cross-graticules, and reds on PDF exports */
-  * {
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
-  }
-
-  #cadastral-combined-sheet {
-    display: flex !important;
-    flex-direction: row !important;
-    align-items: start !important;
-    justify-content: start !important;
-    gap: 0 !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
-    box-shadow: none !important;
-    background: #ffffff !important;
-  }
+/* Base resets & premium global styles */
+html, body {
+  font-family: "Cairo", "Inter", system-ui, sans-serif;
+  scroll-behavior: smooth;
 }
 
-/* Custom leaflet tooltip, rotated labels stability */
-.custom-rotated-label {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-  overflow: visible !important;
+/* Custom scrollbars that match the visual theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.custom-vertex-marker {
-  overflow: visible !important;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.25);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.45);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(75, 85, 99, 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(75, 85, 99, 0.6);
+}
+
+/* Smooth active state transitions */
+.transition-all-custom {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* High-fidelity glowing highlights */
+.glow-primary {
+  box-shadow: 0 0 20px -3px rgba(59, 130, 246, 0.15);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 20px -3px rgba(16, 185, 129, 0.12);
+}
+
+/* Subtle dot-grid background for headers and empty canvases */
+.ambient-pattern {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.08) 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+}
+
+.dark .ambient-pattern {
+  background-image: radial-gradient(rgba(51, 65, 85, 0.2) 1.5px, transparent 1.5px);
+}
+
+/* Accent glassmorphism effects */
+.glass-panel {
+  background-color: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(12px);
+}
+
+.dark .glass-panel {
+  background-color: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(12px);
+}

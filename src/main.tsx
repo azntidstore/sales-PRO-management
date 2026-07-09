@@ -1,76 +1,113 @@
-import {StrictMode} from 'react';
+import React, { StrictMode } from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
-import L from "leaflet";
+import { safeStorage } from './utils/safeStorage';
 
-// Monkeypatch Leaflet to prevent any LatLng constructor crashing with NaN or infinite values
-const OriginalLatLng = L.LatLng;
-const originalLatLngFn = L.latLng;
-
-function sanitize(val: any, fallback: number): number {
-  if (typeof val === 'number' && !isNaN(val) && isFinite(val)) {
-    return val;
-  }
-  if (typeof val === 'string') {
-    const parsed = parseFloat(val);
-    if (!isNaN(parsed) && isFinite(parsed)) return parsed;
-  }
-  return fallback;
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
 }
 
-// Override L.LatLng constructor
-// @ts-ignore
-L.LatLng = function (this: any, lat: any, lng: any, alt: any) {
-  let sLat = 33.5731;
-  let sLng = -7.5898;
-  
-  if (lat !== undefined && lat !== null) {
-    if (typeof lat === 'object' && 'lat' in lat) {
-      sLat = sanitize(lat.lat, 33.5731);
-      sLng = sanitize(lat.lng || lat.lon, -7.5898);
-    } else if (Array.isArray(lat)) {
-      sLat = sanitize(lat[0], 33.5731);
-      sLng = sanitize(lat[1], -7.5898);
-    } else {
-      sLat = sanitize(lat, 33.5731);
-      sLng = sanitize(lng, -7.5898);
-    }
-  }
-  
-  return new (OriginalLatLng as any)(sLat, sLng, alt);
-} as any;
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+  errorInfo: { componentStack: string } | null;
+}
 
-L.LatLng.prototype = OriginalLatLng.prototype;
+class ErrorBoundary extends (React.Component as any) {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
 
-// Override L.latLng factory function
-L.latLng = function (a: any, b?: any, c?: any) {
-  if (a instanceof OriginalLatLng) {
-    return a;
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    return { hasError: true, error };
   }
-  
-  let sLat = 33.5731;
-  let sLng = -7.5898;
-  
-  if (a !== undefined && a !== null) {
-    if (typeof a === 'object' && 'lat' in a) {
-      sLat = sanitize(a.lat, 33.5731);
-      sLng = sanitize(a.lng || a.lon, -7.5898);
-    } else if (Array.isArray(a)) {
-      sLat = sanitize(a[0], 33.5731);
-      sLng = sanitize(a[1], -7.5898);
-    } else {
-      sLat = sanitize(a, 33.5731);
-      sLng = sanitize(b, -7.5898);
+
+  componentDidCatch(error: Error, errorInfo: any) {
+    console.error("REACT RUNTIME ERROR BOUNDARY:", error, errorInfo);
+    this.setState({ errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          padding: '2rem',
+          backgroundColor: '#0f172a',
+          color: '#f8fafc',
+          fontFamily: 'monospace',
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1rem',
+          lineHeight: '1.5'
+        }}>
+          <h1 style={{ color: '#ef4444', margin: '0 0 0.5rem 0' }}>🚨 React Component Interruption</h1>
+          <p style={{ color: '#94a3b8', margin: 0 }}>An unexpected error occurred during rendering flow.</p>
+          <div style={{
+            backgroundColor: '#ef444410',
+            borderLeft: '4px solid #ef4444',
+            padding: '1rem',
+            borderRadius: '0.25rem'
+          }}>
+            <p style={{ fontWeight: 'bold', color: '#f43f5e', margin: '0 0 0.5rem 0' }}>
+              {this.state.error?.name}: {this.state.error?.message}
+            </p>
+          </div>
+          <pre style={{
+            backgroundColor: '#1e293b',
+            padding: '1rem',
+            borderRadius: '0.375rem',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            fontSize: '0.85rem'
+          }}>
+            {this.state.error?.stack || 'No stack trace available'}
+          </pre>
+          <h3>Component Tree Context:</h3>
+          <pre style={{
+            backgroundColor: '#1e293b',
+            padding: '1rem',
+            borderRadius: '0.375rem',
+            overflow: 'auto',
+            whiteSpace: 'pre-wrap',
+            fontSize: '0.85rem'
+          }}>
+            {this.state.errorInfo?.componentStack || 'No component stack trace available'}
+          </pre>
+          <button 
+            onClick={() => {
+              safeStorage.clear();
+              try { sessionStorage.clear(); } catch (e) {}
+              window.location.reload();
+            }}
+            style={{
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              padding: '0.5rem 1rem',
+              borderRadius: '0.25rem',
+              cursor: 'pointer',
+              fontWeight: 'bold',
+              alignSelf: 'flex-start'
+            }}
+          >
+            Clear Local Cache & Reboot App
+          </button>
+        </div>
+      );
     }
+
+    return this.props.children;
   }
-  
-  return originalLatLngFn(sLat, sLng, c);
-} as any;
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 
