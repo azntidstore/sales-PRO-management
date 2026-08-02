@@ -222,7 +222,7 @@ export default function OrderFormModal({
       return;
     }
 
-    const parsedQty = parseInt(quantity) || 0;
+    const parsedQty = parseFloat(quantity) || 0;
     if (parsedQty <= 0) {
       toast(lang === 'ar' ? '⚠️ يرجى إدخال كمية صالحة أكبر من 0' : '⚠️ Veuillez entrer une quantité valide supérieure à 0', 'error');
       return;
@@ -541,13 +541,13 @@ export default function OrderFormModal({
               <input
                 id="order-quantity-input"
                 type="number"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                min="1"
+                inputMode="decimal"
+                step="any"
+                min="0.001"
                 required
                 value={quantity}
                 onChange={e => setQuantity(e.target.value)}
-                placeholder={lang === 'ar' ? 'الكمية صالحة' : 'Ex: 1'}
+                placeholder={lang === 'ar' ? 'مثال: 1 أو 0.5' : 'Ex: 1 ou 0.5'}
                 className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
               />
             </div>
