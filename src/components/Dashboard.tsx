@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Order, Language, UserRole } from '../types';
 import { translations } from '../locales';
 import { DatabaseService } from '../dbMock';
+import { findSellerByName } from '../utils/sellerUtils';
 import { generateExecutiveReportPDF } from '../utils/pdfGenerator';
 import {
   BarChart,
@@ -142,7 +143,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
         if (s) return s.name;
       }
       
-      const sellerObj = sellers.find(sel => sel.name === o.sellerName);
+      const sellerObj = findSellerByName(sellers, o.sellerName);
       if (!sellerObj) {
         return lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)';
       }

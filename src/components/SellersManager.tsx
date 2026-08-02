@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { DatabaseService } from '../dbMock';
 import { Seller, Language, UserRole } from '../types';
 import { translations } from '../locales';
+import { findSellerByName } from '../utils/sellerUtils';
 import { UserPlus, Edit2, Trash2, CheckCircle, XCircle, Phone, Save, X, Network, GitPullRequest, ArrowDown } from 'lucide-react';
 
 interface Props {
@@ -57,7 +58,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setAllProducts(rawProducts);
     
     if (role === 'SUPERVISOR' && currentUser) {
-      const supervisor = rawSellers.find(s => s.name === currentUser);
+      const supervisor = findSellerByName(rawSellers, currentUser);
       if (supervisor) {
         setSellers(rawSellers.filter(s => s.parentId === supervisor.id || s.parentIds?.includes(supervisor.id)));
       } else {

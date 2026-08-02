@@ -5,6 +5,7 @@ import { translations } from './locales';
 import { safeStorage } from './utils/safeStorage';
 import { FirestoreService } from './utils/FirestoreService';
 import { isFirebaseConfigured } from './firebase';
+import { findSellerByName, isSameSellerName } from './utils/sellerUtils';
 
 import SellersManager from './components/SellersManager';
 import ProductsManager from './components/ProductsManager';
@@ -96,7 +97,7 @@ export default function App() {
 
   const rawOrders = DatabaseService.getOrders();
   const rawSellers = DatabaseService.getSellers();
-  const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
+  const currentSellerProfile = findSellerByName(rawSellers, currentUser);
 
   // Filter notifications by hierarchy visibility constraints
   const isNotificationVisible = (notif: AppNotification): boolean => {
@@ -117,7 +118,7 @@ export default function App() {
         return userRole === 'DEPUTY'; // Default fallback for virtual/system logins
       }
 
-      const creatorProfile = rawSellers.find(s => s.name === notif.creatorName);
+      const creatorProfile = findSellerByName(rawSellers, notif.creatorName);
       if (!creatorProfile) {
         return userRole === 'DEPUTY'; // Fallback if creator is not found
       }
@@ -305,16 +306,19 @@ export default function App() {
 
   let orders = rawOrders;
   if (userRole === 'SELLER') {
-    orders = rawOrders.filter(o => o.sellerName === currentUser);
+    orders = rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
   } else if (userRole === 'SUPERVISOR') {
     if (!currentSellerProfile) {
-      orders = rawOrders.filter(o => o.sellerName === currentUser);
+      orders = rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
     } else {
       const childSellers = rawSellers.filter(s => 
         s.parentId === currentSellerProfile.id || 
         (s.parentIds && s.parentIds.includes(currentSellerProfile.id))
       );
-      const childSellerNames = childSellers.map(s => s.name);
+      
+      const isChildSellerName = (nameStr: string) => {
+        return childSellers.some(s => isSameSellerName(s.name, nameStr));
+      };
 
       // Multi-supervisor product assignment matching logic
       const isProductMatching = (orderProductStr: string, assigned: string[] | undefined) => {
@@ -328,17 +332,16 @@ export default function App() {
       };
 
       orders = rawOrders.filter(o => {
-        // Supervisor can always see their own orders (even if they acts as a seller)
-        if (o.sellerName === currentUser) return true;
-        // Supervisor can see a child seller's order ONLY if:
-        // 1. It belongs to this supervisor (if assignedSupervisorId is specified)
-        // 2. The order's product belongs to this supervisor's assigned products
-        if (childSellerNames.includes(o.sellerName)) {
-          if (o.assignedSupervisorId) {
-            if (o.assignedSupervisorId !== currentSellerProfile.id) {
-              return false;
-            }
+        // Supervisor can always see their own orders (even if they act as a seller)
+        if (isSameSellerName(o.sellerName, currentUser)) return true;
+        // Supervisor can see an order if assignedSupervisorId matches their profile
+        if (o.assignedSupervisorId) {
+          if (o.assignedSupervisorId === currentSellerProfile.id) {
+            return isProductMatching(o.product, currentSellerProfile.assignedProducts);
           }
+        }
+        // Or if the seller is a child seller under this supervisor
+        if (isChildSellerName(o.sellerName)) {
           return isProductMatching(o.product, currentSellerProfile.assignedProducts);
         }
         return false;

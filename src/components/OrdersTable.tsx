@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Order, Language, UserRole, Seller } from '../types';
 import { DatabaseService } from '../dbMock';
 import { translations } from '../locales';
+import { findSellerByName, isSameSellerName } from '../utils/sellerUtils';
 import { Edit2, Trash2, Search, Filter, Calendar, Download, Eye, ArrowUpDown, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, CheckCircle2, Clock, Ban, AlertCircle, X } from 'lucide-react';
 
 interface Props {
@@ -72,19 +73,22 @@ export default function OrdersTable({
   const getFilteredRoleOrders = (): Order[] => {
     let rawOrders = DatabaseService.getOrders();
     if (role === 'SELLER') {
-      return rawOrders.filter(o => o.sellerName === currentUser);
+      return rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
     } else if (role === 'SUPERVISOR') {
       const rawSellers = DatabaseService.getSellers();
-      const currentSellerProfile = rawSellers.find(s => s.name === currentUser);
+      const currentSellerProfile = findSellerByName(rawSellers, currentUser);
       if (!currentSellerProfile) {
-        return rawOrders.filter(o => o.sellerName === currentUser);
+        return rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
       }
       
       const childSellers = rawSellers.filter(s => 
         s.parentId === currentSellerProfile.id || 
         (s.parentIds && s.parentIds.includes(currentSellerProfile.id))
       );
-      const childSellerNames = childSellers.map(s => s.name);
+      
+      const isChildSellerName = (nameStr: string) => {
+        return childSellers.some(s => isSameSellerName(s.name, nameStr));
+      };
 
       const isProductMatching = (orderProductStr: string, assigned: string[] | undefined) => {
         if (!assigned || assigned.length === 0) return true;
@@ -97,13 +101,13 @@ export default function OrdersTable({
       };
 
       return rawOrders.filter(o => {
-        if (o.sellerName === currentUser) return true;
-        if (childSellerNames.includes(o.sellerName)) {
-          if (o.assignedSupervisorId) {
-            if (o.assignedSupervisorId !== currentSellerProfile.id) {
-              return false;
-            }
+        if (isSameSellerName(o.sellerName, currentUser)) return true;
+        if (o.assignedSupervisorId) {
+          if (o.assignedSupervisorId === currentSellerProfile.id) {
+            return isProductMatching(o.product, currentSellerProfile.assignedProducts);
           }
+        }
+        if (isChildSellerName(o.sellerName)) {
           return isProductMatching(o.product, currentSellerProfile.assignedProducts);
         }
         return false;
@@ -130,7 +134,7 @@ export default function OrdersTable({
 
   const getFilterSupervisors = (): Seller[] => {
     const sellers = DatabaseService.getSellers();
-    const currentSellerProfile = sellers.find(s => s.name === currentUser);
+    const currentSellerProfile = findSellerByName(sellers, currentUser);
 
     // 1. Regular Seller (SELLER)
     if (role === 'SELLER') {
@@ -213,7 +217,7 @@ export default function OrdersTable({
       return order.assignedSupervisorId === supId;
     }
     const sellers = DatabaseService.getSellers();
-    const sellerObj = sellers.find(s => s.name === order.sellerName);
+    const sellerObj = findSellerByName(sellers, order.sellerName);
     if (!sellerObj) {
       return supId === 'admin_1';
     }

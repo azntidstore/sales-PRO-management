@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Seller, Product, Order, OrderStatus, Language, UserRole } from '../types';
 import { DatabaseService, calculateOrderProfit } from '../dbMock';
 import { translations } from '../locales';
+import { findSellerByName } from '../utils/sellerUtils';
 import { X, Calendar, User, Phone, MapPin, Layers, ShoppingBag, DollarSign, StickyNote, Activity, RefreshCw } from 'lucide-react';
 
 interface Props {
@@ -49,7 +50,7 @@ export default function OrderFormModal({
   const getEligibleSupervisors = (): Seller[] => {
     if (!sellerName) return [];
     const activeSellers = DatabaseService.getSellers();
-    const selectedSeller = activeSellers.find(s => s.name === sellerName);
+    const selectedSeller = findSellerByName(activeSellers, sellerName);
     if (!selectedSeller) return [];
 
     const directParentIds = new Set<string>();
@@ -75,7 +76,7 @@ export default function OrderFormModal({
   const handleSellerChange = (newSellerName: string) => {
     setSellerName(newSellerName);
     const sellersList = DatabaseService.getSellers();
-    const selectedSeller = sellersList.find(s => s.name === newSellerName);
+    const selectedSeller = findSellerByName(sellersList, newSellerName);
     if (selectedSeller) {
       const directParentIds: string[] = [];
       if (selectedSeller.parentId) directParentIds.push(selectedSeller.parentId);
@@ -138,7 +139,7 @@ export default function OrderFormModal({
       
       // Auto select current seller if seller is logged in
       const sellersList = DatabaseService.getSellers().filter(s => s.active);
-      const activeSellersObj = sellersList.find(s => s.name === currentUser);
+      const activeSellersObj = findSellerByName(sellersList, currentUser);
       let selName = '';
       if (activeSellersObj) {
         selName = activeSellersObj.name;
@@ -147,12 +148,13 @@ export default function OrderFormModal({
         selName = sellersList[0].name;
         setSellerName(sellersList[0].name);
       } else {
-        setSellerName('');
+        setSellerName(currentUser || '');
+        selName = currentUser || '';
       }
 
       // Automatically select the first eligible supervisor
       if (selName) {
-        const selectedSeller = sellersList.find(s => s.name === selName);
+        const selectedSeller = findSellerByName(sellersList, selName);
         if (selectedSeller) {
           const directParentIds: string[] = [];
           if (selectedSeller.parentId) directParentIds.push(selectedSeller.parentId);
