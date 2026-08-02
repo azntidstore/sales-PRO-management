@@ -863,29 +863,29 @@ export default function App() {
                   </div>
                   <div className="flex-1">
                     <h4 className="text-xs font-black text-rose-800 dark:text-rose-350 text-start">
-                      🚨 {lang === 'ar' ? 'تم حظر اتصال المزامنة السحابية' : 'Accès à la synchronisation Cloud bloqué'}
+                      🚨 {lang === 'ar' ? 'تنبيه في مزامنة Firestore السحابية' : 'Alerte de synchronisation Cloud Firestore'}
                     </h4>
                     <p className="text-[11px] text-rose-600 dark:text-rose-400 font-bold mt-1 leading-relaxed text-start">
                       {lang === 'ar'
-                        ? `قامت قاعدة بيانات Firestore برفض الطلب بسبب قيود الصلاحيات: "${firestoreError}". هذا يعني أن قواعد الحماية في Firebase (Firestore Rules) تمنع الوصول للبيانات.`
-                        : `Le serveur Firestore a rejeté la requête : "${firestoreError}". Veuillez mettre à jour vos règles de sécurité.`}
+                        ? firestoreError.toLowerCase().includes('permission')
+                          ? `قامت قاعدة بيانات Firestore برفض الطلب بسبب قيود الصلاحيات: "${firestoreError}". هذا يعني أن قواعد الحماية في Firebase (Firestore Rules) تمنع الوصول للبيانات.`
+                          : `حدث خطأ أثناء المزامنة مع Firestore: "${firestoreError}".`
+                        : firestoreError.toLowerCase().includes('permission')
+                          ? `Le serveur Firestore a rejeté la requête (Règles de sécurité) : "${firestoreError}".`
+                          : `Erreur lors de la synchronisation Firestore : "${firestoreError}".`}
                     </p>
                     <div className="mt-3 text-[10px] bg-white/70 dark:bg-slate-950/70 border border-rose-200 dark:border-rose-900/30 p-2.5 rounded-xl space-y-1 text-slate-650 dark:text-slate-400 font-semibold leading-normal text-start">
-                      <p className="font-bold text-rose-700 dark:text-rose-300">💡 {lang === 'ar' ? 'حل المشكلة لتفعيل المزامنة الفورية بين الأجهزة:' : 'Comment résoudre ce problème pour activer la synchronisation :'}</p>
+                      <p className="font-bold text-rose-700 dark:text-rose-300">💡 {lang === 'ar' ? 'حل المشكلة وتفعيل المزامنة بين الأجهزة:' : 'Comment résoudre ce problème :'}</p>
                       <ul className="list-disc list-inside space-y-1.5 mt-1">
                         {lang === 'ar' ? (
                           <>
-                            <li>افتح لوحة تحكم <strong>Firebase Console</strong> الخاصة بك.</li>
-                            <li>انتقل إلى <strong>Firestore Database</strong> ثم تبويب <strong>Rules</strong>.</li>
-                            <li>قم بتعديل القواعد لتسمح بالقراءة والكتابة للجميع: <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code></li>
-                            <li>اضغط على <strong>Publish</strong> وستبدأ المزامنة على كافة الأجهزة فوراً!</li>
+                            <li>إذا كان الخطأ بسبب الصلاحيات (Permission-denied): افتح <strong>Firebase Console</strong> ⬅️ <strong>Firestore Database</strong> ⬅️ <strong>Rules</strong> واجعلها <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code> ثم اضغط <strong>Publish</strong>.</li>
+                            <li>تأكد من إدخال جميع مفتايح البيئة (VITE_FIREBASE_*) في Vercel بدون علامات اقتباس وبناء النسخة من جديد (Redeploy).</li>
                           </>
                         ) : (
                           <>
-                            <li>Allez sur votre <strong>Firebase Console</strong>.</li>
-                            <li>Sous <strong>Firestore Database</strong>, allez dans l’onglet <strong>Rules</strong>.</li>
-                            <li>Autorisez l’accès temporairement en modifiant la règle : <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code></li>
-                            <li>Cliquez sur <strong>Publish</strong> pour activer la synchronisation instantanée.</li>
+                            <li>Si l'erreur concerne les permissions, modifiez vos règles dans Firebase Console : <code className="bg-slate-100 dark:bg-slate-900 px-1 py-0.5 rounded text-[10px] text-rose-600 font-mono">allow read, write: if true;</code> puis cliquez sur Publish.</li>
+                            <li>Vérifiez vos variables d'environnement Vercel (sans guillemets) et redéployez l'application.</li>
                           </>
                         )}
                       </ul>

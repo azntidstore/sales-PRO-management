@@ -23,6 +23,26 @@ const SEED_ORDERS: Order[] = [];
 
 const SEED_LOGS: SheetsSyncLog[] = [];
 
+// Helper to sanitize data before sending to Firestore (removes undefined values which Firestore setDoc rejects)
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object' && data.constructor === Object) {
+    const cleanObj: Record<string, any> = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (val !== undefined) {
+        cleanObj[key] = sanitizeForFirestore(val);
+      }
+    }
+    return cleanObj as T;
+  }
+  return data;
+}
+
 export class FirestoreService {
   static lastError: string | null = null;
   static activeErrors: Map<string, string> = new Map();
@@ -56,7 +76,7 @@ export class FirestoreService {
       const adminDoc = await getDoc(adminDocRef);
 
       if (!adminDoc.exists()) {
-        await setDoc(adminDocRef, SEED_SELLERS[0]);
+        await setDoc(adminDocRef, sanitizeForFirestore(SEED_SELLERS[0]));
         console.log('Admin user created.');
       } else {
         console.log('Admin user admin_1 already exists, skipping overwrite.');
@@ -68,27 +88,27 @@ export class FirestoreService {
         console.log('Seeding Database with default parameters...');
         // Seed Sellers
         for (const s of SEED_SELLERS) {
-          await setDoc(doc(db, 'sellers', s.id), s);
+          await setDoc(doc(db, 'sellers', s.id), sanitizeForFirestore(s));
         }
         // Seed Products
         for (const p of SEED_PRODUCTS) {
-          await setDoc(doc(db, 'products', p.id), p);
+          await setDoc(doc(db, 'products', p.id), sanitizeForFirestore(p));
         }
         // Seed Orders
         for (const o of SEED_ORDERS) {
-          await setDoc(doc(db, 'orders', o.id), o);
+          await setDoc(doc(db, 'orders', o.id), sanitizeForFirestore(o));
         }
         // Seed Logs
         for (const log of SEED_LOGS) {
-          await setDoc(doc(db, 'syncLogs', log.id), log);
+          await setDoc(doc(db, 'syncLogs', log.id), sanitizeForFirestore(log));
         }
         // Seed Settings
-        await setDoc(doc(db, 'settings', 'sheetsConfig'), {
+        await setDoc(doc(db, 'settings', 'sheetsConfig'), sanitizeForFirestore({
           sheetId: '1BxiMVs0XRA5nFMdKv1a6pbgH6uLIJG1cl8X1OWZY7M0',
           connected: true,
           lastSynced: '2026-06-18T14:45:00.000Z',
           syncQueue: []
-        });
+        }));
       }
     } catch (e: any) {
       if (e?.message?.includes('offline') || e?.code === 'unavailable') {
@@ -122,7 +142,7 @@ export class FirestoreService {
   }
 
   static async saveSeller(seller: Seller): Promise<void> {
-    await setDoc(doc(db, 'sellers', seller.id), seller);
+    await setDoc(doc(db, 'sellers', seller.id), sanitizeForFirestore(seller));
   }
 
   static async deleteSeller(id: string): Promise<void> {
@@ -160,7 +180,7 @@ export class FirestoreService {
   }
 
   static async saveProduct(product: Product): Promise<void> {
-    await setDoc(doc(db, 'products', product.id), product);
+    await setDoc(doc(db, 'products', product.id), sanitizeForFirestore(product));
   }
 
   static async deleteProduct(id: string): Promise<void> {
@@ -190,7 +210,7 @@ export class FirestoreService {
   }
 
   static async saveOrder(order: Order): Promise<void> {
-    await setDoc(doc(db, 'orders', order.id), order);
+    await setDoc(doc(db, 'orders', order.id), sanitizeForFirestore(order));
   }
 
   static async deleteOrder(id: string): Promise<void> {
@@ -213,7 +233,7 @@ export class FirestoreService {
   }
 
   static async saveSyncLog(log: SheetsSyncLog): Promise<void> {
-    await setDoc(doc(db, 'syncLogs', log.id), log);
+    await setDoc(doc(db, 'syncLogs', log.id), sanitizeForFirestore(log));
   }
 
   // --- Settings / Sheets Config ---
@@ -229,7 +249,7 @@ export class FirestoreService {
           lastSynced: '2026-06-18T14:45:00.000Z',
           syncQueue: []
         };
-        setDoc(dRef, def);
+        setDoc(dRef, sanitizeForFirestore(def));
         callback(def);
       }
     }, (error) => {
@@ -249,12 +269,12 @@ export class FirestoreService {
       lastSynced: '2026-06-18T14:45:00.000Z',
       syncQueue: []
     };
-    await setDoc(dRef, def);
+    await setDoc(dRef, sanitizeForFirestore(def));
     return def;
   }
 
   static async saveSheetsConfig(config: any): Promise<void> {
-    await setDoc(doc(db, 'settings', 'sheetsConfig'), config);
+    await setDoc(doc(db, 'settings', 'sheetsConfig'), sanitizeForFirestore(config));
   }
 
   // --- Google Sheet Connection Simulation Sync ---
@@ -352,7 +372,7 @@ export class FirestoreService {
   }
 
   static async saveNotification(notification: AppNotification): Promise<void> {
-    await setDoc(doc(db, 'notifications', notification.id), notification);
+    await setDoc(doc(db, 'notifications', notification.id), sanitizeForFirestore(notification));
   }
 
   static async triggerNotification(
