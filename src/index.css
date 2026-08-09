@@ -72,3 +72,23 @@ html, body {
   background-color: rgba(15, 23, 42, 0.75);
   backdrop-filter: blur(12px);
 }
+
+/* Fix mobile date input rendering & visibility across mobile browsers (iOS Safari / Mobile Chrome) */
+input[type="date"] {
+  min-height: 42px;
+  line-height: 1.25;
+}
+
+input[type="date"]::-webkit-date-and-time-value {
+  text-align: inherit;
+  min-height: 1.25em;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
