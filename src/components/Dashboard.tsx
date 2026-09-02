@@ -474,8 +474,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
             {salesOverTimeData.length === 0 ? (
               <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
             ) : viewOverTime === 'chart' ? (
-              <div className="h-64 sm:h-72">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-64 sm:h-72 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <AreaChart data={salesOverTimeData} margin={{ top: 10, right: 10, left: -15, bottom: 5 }}>
                     <defs>
                       <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -561,8 +561,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
             {salesByProductData.length === 0 ? (
               <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
             ) : viewProduct === 'chart' ? (
-              <div className="h-64 sm:h-72">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-64 sm:h-72 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart data={salesByProductData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
                     <defs>
                       <linearGradient id="colorProdRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -650,8 +650,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
               {profitBySellerData.length === 0 ? (
                 <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
               ) : viewSeller === 'chart' ? (
-                <div className="h-64 sm:h-72">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-64 sm:h-72 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <BarChart data={profitBySellerData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
                       <defs>
                         <linearGradient id="colorSellerProfit" x1="0" y1="0" x2="0" y2="1">
@@ -738,8 +738,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
               {profitBySupervisorData.length === 0 ? (
                 <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
               ) : viewSupervisor === 'chart' ? (
-                <div className="h-64 sm:h-72">
-                  <ResponsiveContainer width="100%" height="100%">
+                <div className="h-64 sm:h-72 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <BarChart data={profitBySupervisorData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
                       <defs>
                         <linearGradient id="colorSupervisorProfit" x1="0" y1="0" x2="0" y2="1">
@@ -822,8 +822,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
             {salesByCityData.length === 0 ? (
               <div className="h-64 sm:h-72 flex items-center justify-center text-slate-400 italic text-xs">{t.noData}</div>
             ) : viewCity === 'chart' ? (
-              <div className="h-64 sm:h-72">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-64 sm:h-72 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart data={salesByCityData} layout="vertical" margin={{ top: 10, right: 15, left: -10, bottom: 5 }}>
                     <defs>
                       <linearGradient id="colorCitySales" x1="0" y1="0" x2="1" y2="0">
@@ -916,8 +916,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
             {filteredOrders.length === 0 ? (
               <div className="text-slate-400 italic text-xs">{t.noData}</div>
             ) : viewStatusChart === 'bar' ? (
-              <div className="h-64 sm:h-72 w-full">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-64 sm:h-72 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart data={statusRatiosData} margin={{ top: 15, right: 10, left: -25, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.12} vertical={false} />
                     <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#64748b', fontWeight: 'bold' }} tickLine={false} />
@@ -937,9 +937,9 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
                 </ResponsiveContainer>
               </div>
             ) : viewStatusChart === 'donut' ? (
-              <div className="h-64 sm:h-72 flex flex-col sm:flex-row items-center justify-center gap-6 w-full">
-                <div className="w-1/2 h-40 sm:h-full">
-                  <ResponsiveContainer width="100%" height="100%">
+              <div className="h-64 sm:h-72 flex flex-col sm:flex-row items-center justify-center gap-6 w-full min-w-0">
+                <div className="w-1/2 h-40 sm:h-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <PieChart>
                       <Pie
                         data={statusRatiosData.filter(item => item.value > 0)}

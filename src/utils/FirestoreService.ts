@@ -29,12 +29,14 @@ export function sanitizeForFirestore<T>(data: T): T {
     return data;
   }
   if (Array.isArray(data)) {
-    return data.map(item => sanitizeForFirestore(item)) as unknown as T;
+    return data
+      .filter(item => item !== undefined && item !== null)
+      .map(item => sanitizeForFirestore(item)) as unknown as T;
   }
   if (typeof data === 'object' && data.constructor === Object) {
     const cleanObj: Record<string, any> = {};
     for (const [key, val] of Object.entries(data)) {
-      if (val !== undefined) {
+      if (val !== undefined && val !== null) {
         cleanObj[key] = sanitizeForFirestore(val);
       }
     }
@@ -131,7 +133,18 @@ export class FirestoreService {
       } else {
         const list: Seller[] = [];
         snapshot.forEach((doc) => {
-          list.push(doc.data() as Seller);
+          const item = doc.data() as Seller;
+          const directParent = item.parentId || '';
+          const pIds = Array.isArray(item.parentIds) 
+            ? item.parentIds.filter(Boolean)
+            : (directParent ? [directParent] : []);
+          list.push({
+            ...item,
+            id: item.id || doc.id,
+            parentId: directParent || (pIds.length > 0 ? pIds[0] : ''),
+            parentIds: pIds,
+            phone: item.phone || ''
+          });
         });
         callback(list);
       }
@@ -142,7 +155,21 @@ export class FirestoreService {
   }
 
   static async saveSeller(seller: Seller): Promise<void> {
-    await setDoc(doc(db, 'sellers', seller.id), sanitizeForFirestore(seller));
+    const pIds = Array.isArray(seller.parentIds)
+      ? seller.parentIds.filter(Boolean)
+      : (seller.parentId ? [seller.parentId] : []);
+    const directParent = seller.parentId || (pIds.length > 0 ? pIds[0] : '');
+
+    const sanitizedSeller: Seller = {
+      ...seller,
+      id: seller.id,
+      name: seller.name || '',
+      phone: seller.phone || '',
+      parentId: directParent,
+      parentIds: pIds
+    };
+
+    await setDoc(doc(db, 'sellers', seller.id), sanitizeForFirestore(sanitizedSeller));
   }
 
   static async deleteSeller(id: string): Promise<void> {
@@ -154,7 +181,18 @@ export class FirestoreService {
     const snapshot = await getDocs(q);
     const list: Seller[] = [];
     snapshot.forEach((doc) => {
-      list.push(doc.data() as Seller);
+      const item = doc.data() as Seller;
+      const directParent = item.parentId || '';
+      const pIds = Array.isArray(item.parentIds) 
+        ? item.parentIds.filter(Boolean)
+        : (directParent ? [directParent] : []);
+      list.push({
+        ...item,
+        id: item.id || doc.id,
+        parentId: directParent || (pIds.length > 0 ? pIds[0] : ''),
+        parentIds: pIds,
+        phone: item.phone || ''
+      });
     });
     return list;
   }
@@ -169,7 +207,11 @@ export class FirestoreService {
       } else {
         const list: Product[] = [];
         snapshot.forEach((doc) => {
-          list.push(doc.data() as Product);
+          const item = doc.data() as Product;
+          list.push({
+            ...item,
+            id: item.id || doc.id
+          });
         });
         callback(list);
       }
@@ -197,7 +239,11 @@ export class FirestoreService {
       } else {
         const list: Order[] = [];
         snapshot.forEach((doc) => {
-          list.push(doc.data() as Order);
+          const item = doc.data() as Order;
+          list.push({
+            ...item,
+            id: item.id || doc.id
+          });
         });
         // Sort orders from newest to oldest by date or creation
         list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));

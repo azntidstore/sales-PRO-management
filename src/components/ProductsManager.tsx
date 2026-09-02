@@ -24,6 +24,7 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
   // Search & Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+  const [sortBy, setSortBy] = useState<'name' | 'price_asc' | 'price_desc' | 'margin_desc'>('name');
 
   // Form states
   const [productName, setProductName] = useState('');
@@ -36,9 +37,12 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
   }, [dataTrigger]);
 
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
-      const matchesSearch = !searchTerm.trim() || 
-        p.productName.toLowerCase().includes(searchTerm.trim().toLowerCase());
+    const list = products.filter(p => {
+      const term = searchTerm.trim().toLowerCase();
+      const matchesSearch = !term || 
+        p.productName.toLowerCase().includes(term) ||
+        p.sellingPrice.toString().includes(term) ||
+        p.wholesalePrice.toString().includes(term);
       
       let matchesStatus = true;
       if (statusFilter === 'ACTIVE') matchesStatus = p.active;
@@ -46,7 +50,25 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
 
       return matchesSearch && matchesStatus;
     });
-  }, [products, searchTerm, statusFilter]);
+
+    return list.sort((a, b) => {
+      if (sortBy === 'name') {
+        return a.productName.localeCompare(b.productName);
+      }
+      if (sortBy === 'price_asc') {
+        return a.sellingPrice - b.sellingPrice;
+      }
+      if (sortBy === 'price_desc') {
+        return b.sellingPrice - a.sellingPrice;
+      }
+      if (sortBy === 'margin_desc') {
+        const marginA = a.sellingPrice - a.wholesalePrice;
+        const marginB = b.sellingPrice - b.wholesalePrice;
+        return marginB - marginA;
+      }
+      return 0;
+    });
+  }, [products, searchTerm, statusFilter, sortBy]);
 
   const resetForm = () => {
     setProductName('');
@@ -336,13 +358,32 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
           </button>
         </div>
 
+        {/* Sort selector */}
+        <div className="flex items-center gap-1.5 self-center sm:self-auto shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-2 py-1">
+          <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <select
+            id="products-sort-select"
+            value={sortBy}
+            onChange={e => setSortBy(e.target.value as any)}
+            className="text-xs bg-transparent border-none text-slate-700 dark:text-slate-300 font-semibold focus:outline-hidden cursor-pointer"
+          >
+            <option value="name" className="bg-white dark:bg-slate-900">{lang === 'ar' ? 'ترتيب: بالاسم' : 'Tri: Nom'}</option>
+            <option value="price_asc" className="bg-white dark:bg-slate-900">{lang === 'ar' ? 'السعر: من الأقل' : 'Prix: Croissant'}</option>
+            <option value="price_desc" className="bg-white dark:bg-slate-900">{lang === 'ar' ? 'السعر: من الأعلى' : 'Prix: Décroissant'}</option>
+            {role !== 'PUBLIC' && (
+              <option value="margin_desc" className="bg-white dark:bg-slate-900">{lang === 'ar' ? 'العائد: الأعلى هامشاً' : 'Marge: Décroissant'}</option>
+            )}
+          </select>
+        </div>
+
         {/* Reset Filter Button if active filters */}
-        {(searchTerm || statusFilter !== 'ALL') && (
+        {(searchTerm || statusFilter !== 'ALL' || sortBy !== 'name') && (
           <button
             type="button"
             onClick={() => {
               setSearchTerm('');
               setStatusFilter('ALL');
+              setSortBy('name');
             }}
             title={lang === 'ar' ? 'إعادة ضبط الفلاتر' : 'Réinitialiser les filtres'}
             className="cursor-pointer text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center gap-1 py-1 px-2 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"

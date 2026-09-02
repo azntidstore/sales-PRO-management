@@ -18,7 +18,7 @@ service cloud.firestore {
       allow create, update: if isValidId(sellerId) 
         && request.resource.data.id == sellerId
         && request.resource.data.name is string && request.resource.data.name.size() <= 128
-        && request.resource.data.phone is string && request.resource.data.phone.size() <= 30;
+        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40));
       allow delete: if true;
     }
 

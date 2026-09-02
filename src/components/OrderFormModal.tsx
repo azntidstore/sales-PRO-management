@@ -33,7 +33,7 @@ export default function OrderFormModal({
   const [products, setProducts] = useState<Product[]>([]);
 
   // Form payload states
-  const [orderDate, setOrderDate] = useState('');
+  const [orderDate, setOrderDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [sellerName, setSellerName] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [phone, setPhone] = useState('');
@@ -382,20 +382,29 @@ export default function OrderFormModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* Order Date */}
-            <div id="order-date-field-container" className="w-full">
-              <label htmlFor="order-date-input" className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>{t.orderDate}*</span>
-              </label>
+            <div id="order-date-field-container" className="w-full block">
+              <div className="flex items-center justify-between mb-1.5">
+                <label htmlFor="order-date-input" className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>{t.orderDate}*</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setOrderDate(new Date().toISOString().split('T')[0])}
+                  className="text-[11px] font-bold text-blue-600 hover:text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-955/40 px-2 py-0.5 rounded-md cursor-pointer transition"
+                >
+                  {lang === 'ar' ? 'اليوم' : lang === 'fr' ? "Aujourd'hui" : 'Today'}
+                </button>
+              </div>
               <input
                 id="order-date-input"
                 name="orderDate"
                 type="date"
                 required
-                value={orderDate}
+                value={orderDate || new Date().toISOString().split('T')[0]}
                 onChange={e => setOrderDate(e.target.value)}
                 dir="ltr"
-                className="w-full block h-11 min-h-[44px] text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-start [color-scheme:light] dark:[color-scheme:dark]"
+                className="w-full block h-11 min-h-[44px] text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-start [color-scheme:light] dark:[color-scheme:dark] opacity-100 visible"
               />
             </div>
 

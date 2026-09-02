@@ -75,20 +75,25 @@ html, body {
 
 /* Fix mobile date input rendering & visibility across mobile browsers (iOS Safari / Mobile Chrome) */
 input[type="date"] {
-  min-height: 42px;
-  line-height: 1.25;
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  line-height: 1.3;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 
 input[type="date"]::-webkit-date-and-time-value {
-  text-align: inherit;
-  min-height: 1.25em;
+  text-align: start;
+  min-height: 1.3em;
+  display: block;
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
-  opacity: 0.8;
+  opacity: 0.85;
 }
 
 .dark input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.8);
+  filter: invert(0.85);
 }

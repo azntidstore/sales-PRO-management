@@ -74,9 +74,22 @@ export let isInitialized = false;
 
 // Load data from LocalStorage as fallback or baseline
 export function loadFromLocalStorage() {
-  cacheSellers = loadLocal('sellers', DEFAULT_LOCAL_SELLERS);
-  if (!Array.isArray(cacheSellers)) {
+  const rawSellers = loadLocal('sellers', DEFAULT_LOCAL_SELLERS);
+  if (!Array.isArray(rawSellers)) {
     cacheSellers = DEFAULT_LOCAL_SELLERS;
+  } else {
+    cacheSellers = rawSellers.map((s: Seller) => {
+      const pIds = Array.isArray(s.parentIds) 
+        ? s.parentIds.filter(Boolean) 
+        : (s.parentId ? [s.parentId] : []);
+      return {
+        ...s,
+        id: s.id,
+        phone: s.phone || '',
+        parentId: s.parentId || (pIds.length > 0 ? pIds[0] : ''),
+        parentIds: pIds
+      };
+    });
   }
   cacheProducts = loadLocal('products', DEFAULT_LOCAL_PRODUCTS);
   if (!Array.isArray(cacheProducts)) {
@@ -199,14 +212,27 @@ export class DatabaseService {
 
   static async saveSellers(sellers: Seller[]): Promise<void> {
     const oldSellers = [...cacheSellers];
-    cacheSellers = sellers;
-    saveLocal('sellers', sellers);
+    const sanitizedSellers = sellers.map(s => {
+      const pIds = Array.isArray(s.parentIds)
+        ? s.parentIds.filter(Boolean)
+        : (s.parentId ? [s.parentId] : []);
+      return {
+        ...s,
+        id: s.id,
+        phone: s.phone || '',
+        parentId: s.parentId || (pIds.length > 0 ? pIds[0] : ''),
+        parentIds: pIds
+      };
+    });
+
+    cacheSellers = sanitizedSellers;
+    saveLocal('sellers', sanitizedSellers);
     if (isFirebaseConfigured) {
       try {
-        const newIds = new Set(sellers.map(s => s.id));
+        const newIds = new Set(sanitizedSellers.map(s => s.id));
         const deleted = oldSellers.filter(s => !newIds.has(s.id));
         await Promise.all([
-          ...sellers.map(s => FirestoreService.saveSeller(s)),
+          ...sanitizedSellers.map(s => FirestoreService.saveSeller(s)),
           ...deleted.map(s => FirestoreService.deleteSeller(s.id))
         ]);
         FirestoreService.reportError('sellers_write', null);

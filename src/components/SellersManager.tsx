@@ -103,14 +103,27 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   };
 
   const getEligibleSuperiors = () => {
+    const list = allSellersListFull.filter(s => s.id !== editingId);
+    let admin = list.find(s => s.role === 'ADMIN');
+    if (!admin) {
+      admin = {
+        id: 'admin_1',
+        name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+        role: 'ADMIN' as const,
+        phone: '',
+        active: true,
+        createdAt: ''
+      };
+      list.unshift(admin);
+    }
     if (sellerRole === 'SELLER') {
-      return allSellersListFull.filter(s => (s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN') && s.id !== editingId);
+      return list.filter(s => s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN');
     }
     if (sellerRole === 'SUPERVISOR') {
-      return allSellersListFull.filter(s => (s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN') && s.id !== editingId);
+      return list.filter(s => s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN');
     }
     if (sellerRole === 'DEPUTY') {
-      return allSellersListFull.filter(s => s.role === 'ADMIN' && s.id !== editingId);
+      return list.filter(s => s.role === 'ADMIN');
     }
     return [];
   };
@@ -137,6 +150,13 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     }
     const assignedPassword = password.trim() || '123456';
 
+    const cleanParentIds: string[] = Array.from(new Set(
+      (sellerRole === 'ADMIN' ? [] : selectedParentIds)
+        .filter(Boolean)
+        .map(id => id === 'abdellah' ? 'admin_1' : String(id))
+    ));
+    const directParentId: string = cleanParentIds.length > 0 ? cleanParentIds[0] : '';
+
     if (editingId) {
       // Update
       const index = fullSellers.findIndex(s => s.id === editingId);
@@ -158,8 +178,8 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           username: finalEmail,
           email: finalEmail,
           role: sellerRole,
-          parentId: sellerRole === 'ADMIN' ? '' : (selectedParentIds[0] || ''),
-          parentIds: sellerRole === 'ADMIN' ? [] : selectedParentIds,
+          parentId: sellerRole === 'ADMIN' ? '' : directParentId,
+          parentIds: sellerRole === 'ADMIN' ? [] : cleanParentIds,
           assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
           password: assignedPassword
         };
@@ -189,8 +209,8 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
         username: finalEmail,
         email: finalEmail,
         role: sellerRole,
-        parentId: sellerRole === 'ADMIN' ? '' : (selectedParentIds[0] || ''),
-        parentIds: sellerRole === 'ADMIN' ? [] : selectedParentIds,
+        parentId: sellerRole === 'ADMIN' ? '' : directParentId,
+        parentIds: sellerRole === 'ADMIN' ? [] : cleanParentIds,
         assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
         password: assignedPassword
       };
@@ -221,7 +241,11 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setPassword(seller.password || ''); // Fallback credentials support stored in Firestore document
     setSellerRole(seller.role || 'SELLER');
     setParentId(seller.parentId || '');
-    setSelectedParentIds(seller.parentIds || (seller.parentId ? [seller.parentId] : []));
+    const currentPIds = (seller.parentIds && seller.parentIds.length > 0)
+      ? seller.parentIds
+      : (seller.parentId ? [seller.parentId] : []);
+    const normalizedPIds = currentPIds.map(id => id === 'abdellah' ? 'admin_1' : id);
+    setSelectedParentIds(normalizedPIds);
     setSelectedProductIds(seller.assignedProducts || []);
     setIsFormOpen(true);
   };
@@ -298,16 +322,70 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
 
   const getManagerDisplay = (seller: Seller) => {
     if (seller.role === 'ADMIN') {
-      return lang === 'ar' ? '👑 رئيس الهيكل التنظيمي (المدير)' : '🏆 Sommet de la Hiérarchie';
+      return (
+        <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 font-bold text-xs">
+          👑 {lang === 'ar' ? 'المدير العام' : 'Directeur Général'}
+        </span>
+      );
     }
-    if (!seller.parentId) {
+
+    const directParentIds: string[] = [];
+    if (seller.parentId) directParentIds.push(seller.parentId);
+    if (seller.parentIds && Array.isArray(seller.parentIds)) {
+      seller.parentIds.forEach(id => {
+        if (id && !directParentIds.includes(id)) directParentIds.push(id);
+      });
+    }
+
+    if (directParentIds.length === 0) {
       if (seller.role === 'DEPUTY') {
-        return lang === 'ar' ? '👑 تحت قيادة المدير عبد الله مباشرة' : '👑 Sous la direction d\'Abdellah';
+        return (
+          <span className="inline-flex items-center gap-1 text-purple-600 dark:text-purple-400 font-bold text-xs">
+            👑 {lang === 'ar' ? 'تحت قيادة المدير عبد الله مباشرة' : 'Sous la direction d\'Abdellah'}
+          </span>
+        );
       }
-      return lang === 'ar' ? '⚠️ غير مربوط برئيس مباشر' : '⚠️ Non affecté';
+      return (
+        <span className="inline-flex items-center gap-1 text-slate-400 italic text-xs">
+          ⚠️ {lang === 'ar' ? 'غير مربوط برئيس مباشر' : 'Non affecté'}
+        </span>
+      );
     }
-    const mgr = allSellersListFull.find(s => s.id === seller.parentId);
-    return mgr ? `${mgr.name} (${getTranslatedRole(mgr.role)})` : `⚠️ ${lang === 'ar' ? 'غير مباشر' : 'Non affecté'}`;
+
+    const matchedManagers = directParentIds.map(pid => {
+      if (pid === 'admin_1' || pid === 'abdellah') {
+        const foundAdmin = allSellersListFull.find(s => s.role === 'ADMIN');
+        return foundAdmin || {
+          id: 'admin_1',
+          name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)',
+          role: 'ADMIN' as const
+        };
+      }
+      return allSellersListFull.find(s => s.id === pid);
+    }).filter(Boolean);
+
+    if (matchedManagers.length === 0) {
+      return <span className="text-slate-400 italic text-xs">⚠️ {lang === 'ar' ? 'غير مباشر' : 'Non affecté'}</span>;
+    }
+
+    return (
+      <div className="flex flex-wrap items-center gap-1.5">
+        {matchedManagers.map((mgr: any) => (
+          <span
+            key={mgr.id}
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold border ${
+              mgr.role === 'ADMIN'
+                ? 'bg-red-50 dark:bg-red-955/20 text-red-700 dark:text-red-400 border-red-200 dark:border-red-900/40'
+                : mgr.role === 'DEPUTY'
+                ? 'bg-purple-50 dark:bg-purple-955/20 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-900/40'
+                : 'bg-amber-50 dark:bg-amber-955/20 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-900/40'
+            }`}
+          >
+            {mgr.role === 'ADMIN' ? '👑' : mgr.role === 'DEPUTY' ? '🛡️' : '👥'} {mgr.name}
+          </span>
+        ))}
+      </div>
+    );
   };
 
   const renderHierarchyTree = () => {
@@ -316,10 +394,10 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     // Find all Admin roles
     const dbAdmins = dbSellers.filter(s => s.role === 'ADMIN');
     
-    // If no db admins, let's make a virtual one
+    // If no db admins, create a virtual baseline
     const directors = dbAdmins.length > 0 
       ? dbAdmins 
-      : [{ id: 'abdellah', name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)', role: 'ADMIN' as const, phone: '', active: true, createdAt: '' }];
+      : [{ id: 'admin_1', name: lang === 'ar' ? 'عبد الله (المدير العام)' : 'Abdellah (Directeur)', role: 'ADMIN' as const, phone: '', active: true, createdAt: '' }];
 
     return (
       <div className="space-y-6 text-start">
@@ -327,11 +405,17 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           // Find deputies reporting to this director
           const deputies = dbSellers.filter(s => 
             s.role === 'DEPUTY' && 
-            (s.parentId === director.id || s.parentIds?.includes(director.id) || (director.id === 'abdellah' && (!s.parentId || s.parentId === 'abdellah' || s.parentIds?.includes('abdellah'))))
+            (s.parentId === director.id || s.parentIds?.includes(director.id) || (director.id === 'admin_1' && (!s.parentId || s.parentId === 'abdellah' || s.parentIds?.includes('abdellah'))))
+          );
+
+          // Find direct supervisors reporting to this director (or not under any deputy)
+          const directSupervisors = dbSellers.filter(s => 
+            s.role === 'SUPERVISOR' && 
+            !deputies.some(d => s.parentId === d.id || s.parentIds?.includes(d.id))
           );
 
           return (
-            <div key={director.id} className="bg-slate-50/50 dark:bg-slate-950/20 border border-slate-150 dark:border-slate-850/60 rounded-xl p-5 shadow-2xs">
+            <div key={director.id} className="bg-slate-50/50 dark:bg-slate-950/20 border border-slate-150 dark:border-slate-850/60 rounded-xl p-5 shadow-2xs space-y-5">
               {/* Director Card */}
               <div className="flex items-center gap-3 bg-red-50/50 dark:bg-red-955/20 border border-red-100/40 dark:border-rose-900/45 rounded-xl p-3 max-w-md">
                 <div className="w-10 h-10 rounded-full bg-red-600 text-white flex items-center justify-center font-black shadow-md shrink-0">
@@ -345,23 +429,19 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 </div>
               </div>
 
-              {/* Render Deputy tree */}
-              {deputies.length === 0 ? (
-                <div className="ms-12 mt-3 text-xs italic text-slate-400">
-                  {lang === 'ar' ? '⚠️ لا يوجد نواب مدير مربوطين به حالياً' : 'Aucun adjoint lié'}
-                </div>
-              ) : (
-                <div className="ms-6 md:ms-10 mt-4 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-6 space-y-4">
+              {/* SECTION 1: Deputies (if any) */}
+              {deputies.length > 0 && (
+                <div className="ms-4 md:ms-8 border-s-2 border-dashed border-purple-200 dark:border-purple-900/40 ps-4 md:ps-6 space-y-4">
+                  <div className="text-xs font-black text-purple-700 dark:text-purple-400 uppercase tracking-wider">
+                    🛡️ {lang === 'ar' ? 'نواب المدير العام' : 'Adjoints de Direction'} ({deputies.length})
+                  </div>
                   {deputies.map(deputy => {
-                    // Find supervisors reporting to this deputy
                     const supervisors = dbSellers.filter(s => s.role === 'SUPERVISOR' && (s.parentId === deputy.id || s.parentIds?.includes(deputy.id)));
 
                     return (
-                      <div key={deputy.id} className="relative">
-                        {/* Tree connector */}
-                        <div className="absolute top-5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-6"></div>
+                      <div key={deputy.id} className="relative space-y-3">
+                        <div className="absolute top-5 h-0 w-4 border-t-2 border-dashed border-purple-200 dark:border-purple-900/40 -start-4 md:-start-6"></div>
                         
-                        {/* Deputy Card */}
                         <div className="flex items-center gap-3 bg-purple-50/50 dark:bg-purple-955/20 border border-purple-100/40 dark:border-purple-900/40 rounded-xl p-3 max-w-md">
                           <div className="w-8 h-8 rounded-full bg-purple-600 text-white flex items-center justify-center font-black shadow-sm shrink-0">
                             🛡️
@@ -374,92 +454,30 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                           </div>
                         </div>
 
-                        {/* Render Supervisor tree */}
-                        {supervisors.length === 0 ? (
-                          <div className="ms-10 mt-2 text-xs italic text-slate-400">
-                            {lang === 'ar' ? '⚠️ لا يوجد مشرفون تحت قيادته' : 'Aucun superviseur lié'}
-                          </div>
-                        ) : (
-                          <div className="ms-6 md:ms-8 mt-3 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-6 space-y-4">
-                            {supervisors.map(supervisor => {
-                              // Find sellers reporting to this supervisor (this can be SELLER or SUPERVISOR)
-                              const assignedSellersList = dbSellers.filter(s => 
-                                (s.role === 'SELLER' || s.role === 'SUPERVISOR') && 
-                                s.id !== supervisor.id &&
-                                (s.parentId === supervisor.id || s.parentIds?.includes(supervisor.id))
-                              );
-
-                              return (
-                                <div key={supervisor.id} className="relative">
-                                  {/* Tree connector */}
-                                  <div className="absolute top-5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-6"></div>
-                                  
-                                  {/* Supervisor Card */}
-                                  <div className="flex items-center gap-3 bg-amber-50/50 dark:bg-amber-955/20 border border-amber-100/40 dark:border-amber-900/40 rounded-xl p-3 max-w-md">
-                                    <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-black shadow-sm shrink-0">
-                                      👥
-                                    </div>
-                                    <div>
-                                      <h6 className="font-bold text-slate-800 dark:text-slate-100 text-xs">{supervisor.name}</h6>
-                                      <span className="text-[10px] text-amber-700 dark:text-amber-400 font-extrabold block">
-                                        {lang === 'ar' ? `مشرف مجموعة (${assignedSellersList.length} بائع)` : `Superviseur (${assignedSellersList.length} vendeurs)`}
-                                      </span>
-                                      
-                                      {/* Dual affiliation mark on supervisor card itself */}
-                                      {dbSellers.some(s => s.role === 'SUPERVISOR' && s.id !== supervisor.id && (supervisor.parentId === s.id || supervisor.parentIds?.includes(s.id))) && (
-                                        <span className="inline-block mt-1 text-[8.5px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-955/35 dark:text-indigo-300 border border-indigo-200/50">
-                                          🔄 {lang === 'ar' ? 'بائع لدى مشرف آخر' : 'Vendeur sous un autre superviseur'}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Render Seller list */}
-                                  {assignedSellersList.length === 0 ? (
-                                    <div className="ms-10 mt-2 text-xs italic text-slate-400">
-                                      {lang === 'ar' ? '⚠️ لا يوجد بائعون تحت إشرافه' : 'Aucun vendeur sous supervision'}
-                                    </div>
-                                  ) : (
-                                    <div className="ms-6 md:ms-8 mt-2 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-5 space-y-1.5 py-1">
-                                      {assignedSellersList.map(item => {
-                                        const isDualRoleSupervisor = item.role === 'SUPERVISOR';
-                                        
-                                        return (
-                                          <div key={item.id} className={`relative flex items-center gap-2 text-xs font-semibold py-1.5 px-3 rounded-lg max-w-sm ${
-                                            isDualRoleSupervisor 
-                                              ? 'bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/50 dark:border-indigo-900/40 shadow-3xs' 
-                                              : 'bg-sky-50/45 dark:bg-sky-955/15 border border-sky-100/40 dark:border-sky-900/25'
-                                          }`}>
-                                            {/* Tree connector */}
-                                            <div className="absolute top-4.5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-5"></div>
-                                            
-                                            <span className={`w-1.5 h-1.5 rounded-full ${isDualRoleSupervisor ? 'bg-indigo-500 animate-pulse' : 'bg-sky-450'}`}></span>
-                                            
-                                            <div className="flex flex-col">
-                                              <span className={`font-bold ${isDualRoleSupervisor ? 'text-indigo-950 dark:text-indigo-300 font-extrabold' : 'text-slate-705 dark:text-slate-300'}`}>
-                                                {item.name}
-                                              </span>
-                                              {isDualRoleSupervisor && (
-                                                <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-black mt-0.5 flex items-center gap-0.5">
-                                                  🔄 {lang === 'ar' ? 'مشرف مجموعة (يعمل كبائع هنا)' : 'Superviseur (agit comme vendeur)'}
-                                                </span>
-                                              )}
-                                            </div>
-                                            
-                                            <span className="text-[10px] text-slate-400 font-bold ms-auto">({item.phone || '-'})</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
+                        {supervisors.length > 0 && (
+                          <div className="ms-4 md:ms-6 border-s-2 border-dashed border-amber-200 dark:border-amber-900/40 ps-4 md:ps-5 space-y-3">
+                            {supervisors.map(sup => renderSupervisorBlock(sup, dbSellers))}
                           </div>
                         )}
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* SECTION 2: Direct Supervisors under Director */}
+              {directSupervisors.length > 0 && (
+                <div className="ms-4 md:ms-8 border-s-2 border-dashed border-amber-200 dark:border-amber-900/40 ps-4 md:ps-6 space-y-3">
+                  <div className="text-xs font-black text-amber-700 dark:text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                    👥 {lang === 'ar' ? 'مشرفو المجموعات' : 'Superviseurs d\'équipe'} ({directSupervisors.length})
+                  </div>
+                  {directSupervisors.map(sup => renderSupervisorBlock(sup, dbSellers))}
+                </div>
+              )}
+
+              {deputies.length === 0 && directSupervisors.length === 0 && (
+                <div className="ms-8 text-xs italic text-slate-400">
+                  {lang === 'ar' ? '⚠️ لا يوجد مشرفون أو نواب مسجلون حالياً' : 'Aucun superviseur ou adjoint enregistré'}
                 </div>
               )}
             </div>
@@ -483,6 +501,94 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 ))
               }
             </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSupervisorBlock = (supervisor: Seller, dbSellers: Seller[]) => {
+    // Find sellers reporting to this supervisor (this can be SELLER or SUPERVISOR)
+    const assignedSellersList = dbSellers.filter(s => 
+      (s.role === 'SELLER' || s.role === 'SUPERVISOR') && 
+      s.id !== supervisor.id &&
+      (s.parentId === supervisor.id || s.parentIds?.includes(supervisor.id))
+    );
+
+    return (
+      <div key={supervisor.id} className="relative space-y-2">
+        {/* Tree connector */}
+        <div className="absolute top-5 h-0 w-4 border-t-2 border-dashed border-amber-200 dark:border-amber-900/40 -start-4 md:-start-6"></div>
+        
+        {/* Supervisor Card */}
+        <div className="flex items-center gap-3 bg-amber-50/50 dark:bg-amber-955/20 border border-amber-100/40 dark:border-amber-900/40 rounded-xl p-3 max-w-md">
+          <div className="w-8 h-8 rounded-full bg-amber-500 text-white flex items-center justify-center font-black shadow-sm shrink-0">
+            👥
+          </div>
+          <div>
+            <h6 className="font-bold text-slate-800 dark:text-slate-100 text-xs">{supervisor.name}</h6>
+            <span className="text-[10px] text-amber-700 dark:text-amber-400 font-extrabold block">
+              {lang === 'ar' ? `مشرف مجموعة (${assignedSellersList.length} بائع)` : `Superviseur (${assignedSellersList.length} vendeurs)`}
+            </span>
+            
+            {/* Dual affiliation mark on supervisor card itself */}
+            {dbSellers.some(s => s.role === 'SUPERVISOR' && s.id !== supervisor.id && (supervisor.parentId === s.id || supervisor.parentIds?.includes(s.id))) && (
+              <span className="inline-block mt-1 text-[8.5px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-955/35 dark:text-indigo-300 border border-indigo-200/50">
+                🔄 {lang === 'ar' ? 'بائع لدى مشرف آخر' : 'Vendeur sous un autre superviseur'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Render Seller list */}
+        {assignedSellersList.length === 0 ? (
+          <div className="ms-8 text-xs italic text-slate-400">
+            {lang === 'ar' ? '⚠️ لا يوجد بائعون تحت إشرافه' : 'Aucun vendeur sous supervision'}
+          </div>
+        ) : (
+          <div className="ms-6 md:ms-8 border-s-2 border-dashed border-slate-200 dark:border-slate-800 ps-4 md:ps-5 space-y-1.5 py-1">
+            {assignedSellersList.map(item => {
+              const isDualRoleSupervisor = item.role === 'SUPERVISOR';
+              // Check if item has other supervisors
+              const allParentIds = item.parentIds && item.parentIds.length > 0
+                ? item.parentIds
+                : (item.parentId ? [item.parentId] : []);
+              const otherSupervisorIds = allParentIds.filter(pid => pid !== supervisor.id && pid !== 'admin_1' && pid !== 'abdellah');
+              const otherSupervisors = dbSellers.filter(s => otherSupervisorIds.includes(s.id));
+              
+              return (
+                <div key={item.id} className={`relative flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 text-xs font-semibold py-1.5 px-3 rounded-lg max-w-md ${
+                  isDualRoleSupervisor 
+                    ? 'bg-indigo-50/70 dark:bg-indigo-950/20 border border-indigo-200/50 dark:border-indigo-900/40 shadow-3xs' 
+                    : 'bg-sky-50/45 dark:bg-sky-955/15 border border-sky-100/40 dark:border-sky-900/25'
+                }`}>
+                  {/* Tree connector */}
+                  <div className="absolute top-4.5 h-0 w-4 border-t-2 border-dashed border-slate-200 dark:border-slate-800 -start-4 md:-start-5"></div>
+                  
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isDualRoleSupervisor ? 'bg-indigo-500 animate-pulse' : 'bg-sky-450'}`}></span>
+                    
+                    <div className="flex flex-col">
+                      <span className={`font-bold ${isDualRoleSupervisor ? 'text-indigo-950 dark:text-indigo-300 font-extrabold' : 'text-slate-705 dark:text-slate-300'}`}>
+                        {item.name}
+                      </span>
+                      {isDualRoleSupervisor && (
+                        <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-black mt-0.5 flex items-center gap-0.5">
+                          🔄 {lang === 'ar' ? 'مشرف مجموعة (يعمل كبائع هنا)' : 'Superviseur (agit comme vendeur)'}
+                        </span>
+                      )}
+                      {otherSupervisors.length > 0 && (
+                        <span className="text-[9px] text-amber-600 dark:text-amber-400 font-bold mt-0.5 flex items-center gap-1">
+                          🔄 {lang === 'ar' ? `مشترك أيضاً مع: ${otherSupervisors.map(os => os.name).join(', ')}` : `Partagé avec: ${otherSupervisors.map(os => os.name).join(', ')}`}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <span className="text-[10px] text-slate-400 font-bold shrink-0">({item.phone || '-'})</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -631,44 +737,30 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
               </label>
               
               <div className="space-y-2 max-h-40 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5">
-                {/* Deputy reporting to abdellah option */}
-                {sellerRole === 'DEPUTY' && (
-                  <label className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={selectedParentIds.includes('abdellah')}
-                      onChange={e => {
-                        if (e.target.checked) {
-                          setSelectedParentIds([...selectedParentIds, 'abdellah']);
-                        } else {
-                          setSelectedParentIds(selectedParentIds.filter(id => id !== 'abdellah'));
-                        }
-                      }}
-                      className="rounded-sm text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                    />
-                    <span>👑 عبد الله (المدير العام الأساسي)</span>
-                  </label>
-                )}
+                {getEligibleSuperiors().map(sup => {
+                  const isChecked = selectedParentIds.includes(sup.id) || (sup.id === 'admin_1' && selectedParentIds.includes('abdellah'));
+                  return (
+                    <label key={sup.id} className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            setSelectedParentIds([...selectedParentIds.filter(id => id !== 'abdellah' && id !== sup.id), sup.id]);
+                          } else {
+                            setSelectedParentIds(selectedParentIds.filter(id => id !== sup.id && id !== 'abdellah'));
+                          }
+                        }}
+                        className="rounded-sm text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                      />
+                      <span>
+                        {sup.role === 'ADMIN' ? '👑' : sup.role === 'DEPUTY' ? '🛡️' : '👥'} {sup.name} <span className="text-[10px] text-slate-400 font-normal">({getTranslatedRole(sup.role)})</span>
+                      </span>
+                    </label>
+                  );
+                })}
 
-                {getEligibleSuperiors().map(sup => (
-                  <label key={sup.id} className="flex items-center gap-2 cursor-pointer py-1 hover:bg-slate-50 dark:hover:bg-slate-850 px-1.5 rounded-md text-xs font-bold text-slate-800 dark:text-slate-200">
-                    <input
-                      type="checkbox"
-                      checked={selectedParentIds.includes(sup.id)}
-                      onChange={e => {
-                        if (e.target.checked) {
-                          setSelectedParentIds([...selectedParentIds, sup.id]);
-                        } else {
-                          setSelectedParentIds(selectedParentIds.filter(id => id !== sup.id));
-                        }
-                      }}
-                      className="rounded-sm text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                    />
-                    <span>👤 {sup.name} <span className="text-[10px] text-slate-400 font-normal">({getTranslatedRole(sup.role)})</span></span>
-                  </label>
-                ))}
-
-                {sellerRole !== 'DEPUTY' && getEligibleSuperiors().length === 0 && (
+                {getEligibleSuperiors().length === 0 && (
                   <p className="text-xs text-slate-400 italic p-2 text-center">
                     {lang === 'ar' ? 'لا يوجد مسؤولون مؤهلون متوفرون' : 'Aucun responsable éligible disponible'}
                   </p>
