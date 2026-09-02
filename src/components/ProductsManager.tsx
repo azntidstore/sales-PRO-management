@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { DatabaseService } from '../dbMock';
 import { Product, Language, UserRole } from '../types';
 import { translations } from '../locales';
-import { Tag, Edit2, Trash2, CheckCircle, XCircle, Save, X } from 'lucide-react';
+import { Tag, Edit2, Trash2, CheckCircle, XCircle, Save, X, Search, Filter, RotateCcw } from 'lucide-react';
 
 interface Props {
   lang: Language;
@@ -21,6 +21,10 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  // Search & Filter state
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'INACTIVE'>('ALL');
+
   // Form states
   const [productName, setProductName] = useState('');
   const [wholesalePrice, setWholesalePrice] = useState<string>('');
@@ -30,6 +34,19 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
   useEffect(() => {
     setProducts(DatabaseService.getProducts());
   }, [dataTrigger]);
+
+  const filteredProducts = useMemo(() => {
+    return products.filter(p => {
+      const matchesSearch = !searchTerm.trim() || 
+        p.productName.toLowerCase().includes(searchTerm.trim().toLowerCase());
+      
+      let matchesStatus = true;
+      if (statusFilter === 'ACTIVE') matchesStatus = p.active;
+      if (statusFilter === 'INACTIVE') matchesStatus = !p.active;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [products, searchTerm, statusFilter]);
 
   const resetForm = () => {
     setProductName('');
@@ -257,6 +274,85 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
         </form>
       )}
 
+      {/* Search and Filter Bar */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between mb-4 bg-slate-50/70 dark:bg-slate-950/40 p-3 rounded-xl border border-slate-150 dark:border-slate-800/80">
+        {/* Search Input */}
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute start-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            id="products-search-input"
+            type="text"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            placeholder={lang === 'ar' ? 'بحث باسم المنتج...' : lang === 'fr' ? 'Rechercher par nom...' : 'Search by product name...'}
+            className="w-full text-xs sm:text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2 ps-9 pe-8 text-slate-800 dark:text-slate-100 placeholder:text-slate-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute end-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Status Filter Buttons */}
+        <div className="flex items-center gap-1.5 self-center sm:self-auto shrink-0 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-1">
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ALL')}
+            className={`cursor-pointer px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+              statusFilter === 'ALL'
+                ? 'bg-blue-600 text-white shadow-2xs'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            {lang === 'ar' ? 'الكل' : lang === 'fr' ? 'Tous' : 'All'} ({products.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('ACTIVE')}
+            className={`cursor-pointer px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1 ${
+              statusFilter === 'ACTIVE'
+                ? 'bg-emerald-600 text-white shadow-2xs'
+                : 'text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+            }`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            {lang === 'ar' ? 'نشط' : lang === 'fr' ? 'Actif' : 'Active'} ({products.filter(p => p.active).length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setStatusFilter('INACTIVE')}
+            className={`cursor-pointer px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1 ${
+              statusFilter === 'INACTIVE'
+                ? 'bg-rose-600 text-white shadow-2xs'
+                : 'text-rose-700 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40'
+            }`}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+            {lang === 'ar' ? 'غير نشط' : lang === 'fr' ? 'Inactif' : 'Inactive'} ({products.filter(p => !p.active).length})
+          </button>
+        </div>
+
+        {/* Reset Filter Button if active filters */}
+        {(searchTerm || statusFilter !== 'ALL') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearchTerm('');
+              setStatusFilter('ALL');
+            }}
+            title={lang === 'ar' ? 'إعادة ضبط الفلاتر' : 'Réinitialiser les filtres'}
+            className="cursor-pointer text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 flex items-center gap-1 py-1 px-2 rounded-lg hover:bg-slate-200/60 dark:hover:bg-slate-800 transition"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{lang === 'ar' ? 'إعادة ضبط' : 'Réinitialiser'}</span>
+          </button>
+        )}
+      </div>
+
       <div className="overflow-x-auto rounded-lg border border-slate-100 dark:border-slate-800">
         <table className="w-full text-start text-sm border-collapse">
           <thead>
@@ -274,14 +370,33 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-150 dark:divide-slate-800/60">
-            {products.length === 0 ? (
+            {filteredProducts.length === 0 ? (
               <tr>
                 <td colSpan={6} className="py-8 text-center text-slate-400 italic">
-                  {t.noData}
+                  {products.length === 0 ? (
+                    t.noData
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2 py-4">
+                      <Search className="w-6 h-6 text-slate-300 dark:text-slate-600" />
+                      <p className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+                        {lang === 'ar' ? 'لا توجد منتجات تطابق البحث أو الفلتر المحدد' : lang === 'fr' ? 'Aucun produit ne correspond à votre recherche' : 'No products match your search or filter'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          setStatusFilter('ALL');
+                        }}
+                        className="cursor-pointer mt-1 text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                      >
+                        {lang === 'ar' ? 'إعادة ضبط فلاتر البحث' : 'Réinitialiser la recherche'}
+                      </button>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (
-              products.map(product => (
+              filteredProducts.map(product => (
                 <tr key={product.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 text-slate-700 dark:text-slate-300 transition-colors">
                   <td className="py-3 px-4 font-medium text-slate-850 dark:text-slate-150">{product.productName}</td>
                   {role !== 'PUBLIC' && (

@@ -104,10 +104,10 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
 
   const getEligibleSuperiors = () => {
     if (sellerRole === 'SELLER') {
-      return allSellersListFull.filter(s => s.role === 'SUPERVISOR' && s.id !== editingId);
+      return allSellersListFull.filter(s => (s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN') && s.id !== editingId);
     }
     if (sellerRole === 'SUPERVISOR') {
-      return allSellersListFull.filter(s => (s.role === 'DEPUTY' || s.role === 'SUPERVISOR') && s.id !== editingId);
+      return allSellersListFull.filter(s => (s.role === 'SUPERVISOR' || s.role === 'DEPUTY' || s.role === 'ADMIN') && s.id !== editingId);
     }
     if (sellerRole === 'DEPUTY') {
       return allSellersListFull.filter(s => s.role === 'ADMIN' && s.id !== editingId);

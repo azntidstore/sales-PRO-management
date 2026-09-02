@@ -85,7 +85,7 @@ export default function OrderFormModal({
           if (!directParentIds.includes(id)) directParentIds.push(id);
         });
       }
-      if (directParentIds.length > 0) {
+      if (directParentIds.length === 1) {
         setAssignedSupervisorId(directParentIds[0]);
       } else {
         setAssignedSupervisorId('');
@@ -99,6 +99,14 @@ export default function OrderFormModal({
     // Collect active sellers/products
     setSellers(DatabaseService.getSellers().filter(s => s.active));
     setProducts(DatabaseService.getProducts().filter(p => p.active));
+
+    // Ensure scroll is at the top when modal opens
+    if (isOpen) {
+      const backdrop = document.getElementById('order-form-backdrop');
+      if (backdrop) {
+        backdrop.scrollTop = 0;
+      }
+    }
   }, [isOpen]);
 
   useEffect(() => {
@@ -152,7 +160,7 @@ export default function OrderFormModal({
         selName = currentUser || '';
       }
 
-      // Automatically select the first eligible supervisor
+      // If seller has only 1 supervisor, auto-select; if multiple, require explicit choice!
       if (selName) {
         const selectedSeller = findSellerByName(sellersList, selName);
         if (selectedSeller) {
@@ -163,7 +171,7 @@ export default function OrderFormModal({
               if (!directParentIds.includes(id)) directParentIds.push(id);
             });
           }
-          if (directParentIds.length > 0) {
+          if (directParentIds.length === 1) {
             setAssignedSupervisorId(directParentIds[0]);
           } else {
             setAssignedSupervisorId('');
@@ -240,6 +248,20 @@ export default function OrderFormModal({
       return;
     }
 
+    // Supervisor validation: if seller has multiple supervisors, assigned supervisor is mandatory!
+    const eligibleSups = getEligibleSupervisors();
+    if (eligibleSups.length > 1 && !assignedSupervisorId) {
+      toast(
+        lang === 'ar'
+          ? '⚠️ يرجى اختيار المشرف المسؤول عن هذه الطلبية قبل الحفظ (البائع مسجل تحت أكثر من مشرف)'
+          : '⚠️ Veuillez sélectionner le superviseur responsable de cette commande',
+        'error'
+      );
+      return;
+    }
+
+    const effectiveSupervisorId = assignedSupervisorId || (eligibleSups.length === 1 ? eligibleSups[0].id : undefined);
+
     // Profit calculation: 
     // Profit = TotalAmount - DeliveryCost - (WholesalePrice * Quantity) if Delivered, else 0
     const profit = calculateOrderProfit(
@@ -273,7 +295,7 @@ export default function OrderFormModal({
             notes: notes.trim(),
             orderStatus,
             profit,
-            assignedSupervisorId: assignedSupervisorId || undefined,
+            assignedSupervisorId: effectiveSupervisorId,
             updatedAt: new Date().toISOString()
           };
         }
@@ -308,7 +330,7 @@ export default function OrderFormModal({
         orderStatus,
         profit,
         createdBy: currentUser,
-        assignedSupervisorId: assignedSupervisorId || undefined,
+        assignedSupervisorId: effectiveSupervisorId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -333,8 +355,8 @@ export default function OrderFormModal({
 
 
   return (
-    <div id="order-form-backdrop" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs transition-opacity duration-200 overflow-y-auto">
-      <div id="order-form-container" className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-800 p-6 md:p-8 animate-in fade-in zoom-in-95 duration-150 my-8">
+    <div id="order-form-backdrop" className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-4 bg-black/60 backdrop-blur-xs transition-opacity duration-200 flex justify-center items-start sm:items-center">
+      <div id="order-form-container" className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-800 p-4 sm:p-6 md:p-8 animate-in fade-in zoom-in-95 duration-150 my-2 sm:my-8 shrink-0">
         
         {/* Header */}
         <div className="flex justify-between items-center pb-4 mb-6 border-b border-slate-100 dark:border-slate-800">
@@ -360,18 +382,20 @@ export default function OrderFormModal({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             
             {/* Order Date */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                {t.orderDate}*
+            <div id="order-date-field-container" className="w-full">
+              <label htmlFor="order-date-input" className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{t.orderDate}*</span>
               </label>
               <input
                 id="order-date-input"
+                name="orderDate"
                 type="date"
                 required
                 value={orderDate}
                 onChange={e => setOrderDate(e.target.value)}
-                className="w-full block min-h-[42px] text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 [color-scheme:light] dark:[color-scheme:dark]"
+                dir="ltr"
+                className="w-full block h-11 min-h-[44px] text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 text-start [color-scheme:light] dark:[color-scheme:dark]"
               />
             </div>
 
@@ -413,13 +437,13 @@ export default function OrderFormModal({
               </p>
               <select
                 id="order-supervisor-select"
-                required
+                required={getEligibleSupervisors().length > 1}
                 disabled={!!editingOrder && role !== 'ADMIN' && role !== 'DEPUTY'}
                 value={assignedSupervisorId}
                 onChange={e => setAssignedSupervisorId(e.target.value)}
                 className="w-full text-sm bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer disabled:bg-slate-100 dark:disabled:bg-slate-900 disabled:opacity-75 disabled:cursor-not-allowed"
               >
-                <option value="">{lang === 'ar' ? '-- اختر المشرف --' : '-- Choisir le superviseur --'}</option>
+                <option value="">{lang === 'ar' ? '-- اختر المشرف المسؤول عن الطلبية --' : '-- Choisir le superviseur --'}</option>
                 {getEligibleSupervisors().map(sup => (
                   <option key={sup.id} value={sup.id}>
                     {sup.name} ({sup.role === 'ADMIN' ? (lang === 'ar' ? 'مدير' : 'Directeur') : (lang === 'ar' ? 'مشرف' : 'Superviseur')})

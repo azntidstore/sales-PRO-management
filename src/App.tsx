@@ -334,14 +334,26 @@ export default function App() {
       orders = rawOrders.filter(o => {
         // Supervisor can always see their own orders (even if they act as a seller)
         if (isSameSellerName(o.sellerName, currentUser)) return true;
-        // Supervisor can see an order if assignedSupervisorId matches their profile
+
+        // If an order has an assigned supervisor explicitly set:
         if (o.assignedSupervisorId) {
           if (o.assignedSupervisorId === currentSellerProfile.id) {
             return isProductMatching(o.product, currentSellerProfile.assignedProducts);
           }
+          // Assigned to a different supervisor -> STRICTLY DO NOT show!
+          return false;
         }
-        // Or if the seller is a child seller under this supervisor
+
+        // Fallback for orders without assignedSupervisorId
         if (isChildSellerName(o.sellerName)) {
+          const sellerObj = findSellerByName(rawSellers, o.sellerName);
+          const parentCount = (sellerObj?.parentIds?.length || 0) + 
+            (sellerObj?.parentId && !sellerObj?.parentIds?.includes(sellerObj.parentId) ? 1 : 0);
+          
+          if (parentCount > 1) {
+            return false;
+          }
+
           return isProductMatching(o.product, currentSellerProfile.assignedProducts);
         }
         return false;

@@ -101,13 +101,29 @@ export default function OrdersTable({
       };
 
       return rawOrders.filter(o => {
+        // Supervisor can always see their own orders (even if they act as a seller)
         if (isSameSellerName(o.sellerName, currentUser)) return true;
+
+        // If an order has an assigned supervisor explicitly set:
         if (o.assignedSupervisorId) {
           if (o.assignedSupervisorId === currentSellerProfile.id) {
             return isProductMatching(o.product, currentSellerProfile.assignedProducts);
           }
+          // Assigned to a different supervisor -> STRICTLY do not show to this supervisor!
+          return false;
         }
+
+        // Fallback for orders without assignedSupervisorId
         if (isChildSellerName(o.sellerName)) {
+          const sellerObj = findSellerByName(rawSellers, o.sellerName);
+          const parentCount = (sellerObj?.parentIds?.length || 0) + 
+            (sellerObj?.parentId && !sellerObj?.parentIds?.includes(sellerObj.parentId) ? 1 : 0);
+          
+          // If the seller has multiple supervisors, do not leak unassigned orders across supervisors
+          if (parentCount > 1) {
+            return false;
+          }
+
           return isProductMatching(o.product, currentSellerProfile.assignedProducts);
         }
         return false;
@@ -228,6 +244,7 @@ export default function OrdersTable({
       return sellerObj.parentId === supId;
     }
     if (sellerObj.parentIds && sellerObj.parentIds.includes(supId)) {
+      if (sellerObj.parentIds.length > 1) return false;
       return true;
     }
     return supId === 'admin_1';
