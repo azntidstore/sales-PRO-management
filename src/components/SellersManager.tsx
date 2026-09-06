@@ -243,13 +243,12 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       toast(lang === 'ar' ? 'ليست لديك صلاحية تفعيل هذا الحساب.' : `Vous n'avez pas la permission d'activer ce compte.`, 'error');
       return;
     }
-
     if (seller.uid) {
-      toast(lang === 'ar' ? 'هذا البائع مرتبط بالفعل بحساب Firebase.' : 'Ce vendeur est déjà lié à un compte Firebase.', 'info');
+      toast(lang === 'ar' ? 'هذا الحساب مرتبط بالفعل بحساب Firebase.' : 'Ce compte est déjà lié à Firebase.', 'info');
       return;
     }
-
-    if (!(seller.email || seller.username)?.trim()) {
+    const email = (seller.email || seller.username || '').trim();
+    if (!email) {
       toast(lang === 'ar' ? 'لا يمكن تفعيل الحساب بدون بريد إلكتروني.' : `Impossible d'activer le compte sans adresse e-mail.`, 'error');
       return;
     }
@@ -258,21 +257,98 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       const result = await DatabaseService.provisionExistingSellerAccount(seller);
       toast(
         lang === 'ar'
-          ? `تم تفعيل حساب ${seller.name} بنجاح. تم إرسال رابط تعيين كلمة المرور إلى البريد الإلكتروني.`
-          : `Le compte de ${seller.name} a été activé. Un lien de définition du mot de passe a été envoyé.`,
+          ? 'تم تفعيل الحساب وإرسال رابط تعيين كلمة المرور.'
+          : 'Compte activé et lien de définition du mot de passe envoyé.',
         'success'
       );
-      console.info('[SELLER PROVISIONING] Existing seller activated:', { sellerId: seller.id, uid: result.uid, authCreated: result.authCreated });
+      console.info('[SELLER PROVISIONING] Existing seller activated:', {
+        sellerId: seller.id,
+        uid: result.uid,
+        authCreated: result.authCreated,
+      });
       onDataChange();
       refreshSellers();
     } catch (error: any) {
-      console.error('[SELLER PROVISIONING] Existing seller activation failed:', error);
+      console.error('[SELLER PROVISIONING] Failed:', error);
       toast(
         lang === 'ar'
           ? `تعذر تفعيل الحساب: ${error?.message || 'خطأ غير معروف'}`
-          : `Échec de l'activation : ${error?.message || 'Erreur inconnue'}`,
+          : `Impossible d'activer le compte : ${error?.message || 'erreur inconnue'}`,
         'error'
       );
+    }
+  };
+
+  const handleOpenSettlementSession = async (seller: Seller) => {
+    if (isReadOnly || !canManageUserWithRole(seller.role)) {
+      toast(
+        lang === 'ar'
+          ? 'ليست لديك صلاحية فتح جلسة لهذا الحساب.'
+          : 'Vous n\'avez pas la permission d\'ouvrir une session pour ce compte.',
+        'error'
+      );
+      return;
+    }
+    if (seller.role !== 'SELLER') {
+      toast(
+        lang === 'ar'
+          ? 'فتح جلسات التسوية متاح للبائعين فقط.'
+          : 'Les sessions de règlement sont disponibles uniquement pour les vendeurs.',
+        'error'
+      );
+      return;
+    }
+    if (!seller.active) {
+      toast(
+        lang === 'ar'
+          ? 'لا يمكن فتح جلسة لبائع غير نشط.'
+          : 'Impossible d\'ouvrir une session pour un vendeur inactif.',
+        'error'
+      );
+      return;
+    }
+    if (!seller.uid) {
+      toast(
+        lang === 'ar'
+          ? 'فعّل حساب البائع أولاً قبل فتح جلسة.'
+          : 'Activez d’abord le compte du vendeur avant d’ouvrir une session.',
+        'error'
+      );
+      return;
+    }
+
+    try {
+      const session = await DatabaseService.openSettlementSession(seller.id);
+      toast(
+        lang === 'ar'
+          ? `تم فتح جلسة جديدة للبائع ${seller.name}.`
+          : `Nouvelle session ouverte pour ${seller.name}.`,
+        'success'
+      );
+      console.info('[SETTLEMENT SESSION] Opened:', {
+        sessionId: session?.sessionId,
+        sellerId: seller.id,
+      });
+      onDataChange();
+      refreshSellers();
+    } catch (error: any) {
+      console.error('[SETTLEMENT SESSION] Failed:', error);
+      const message = String(error?.message || '');
+      if (message === 'SESSION_ALREADY_OPEN') {
+        toast(
+          lang === 'ar'
+            ? 'توجد جلسة مفتوحة بالفعل لهذا البائع.'
+            : 'Une session est déjà ouverte pour ce vendeur.',
+          'info'
+        );
+      } else {
+        toast(
+          lang === 'ar'
+            ? `تعذر فتح جلسة التسوية: ${message || 'خطأ غير معروف'}`
+            : `Impossible d'ouvrir la session de règlement : ${message || 'erreur inconnue'}`,
+          'error'
+        );
+      }
     }
   };
 
@@ -947,6 +1023,16 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                             title={lang === 'ar' ? 'تفعيل حساب Firebase وإرسال رابط كلمة المرور' : 'Activer Firebase et envoyer le lien de mot de passe'}
                           >
                             {lang === 'ar' ? 'تفعيل' : 'Activer'}
+                          </button>
+                        )}
+                        {canManageUserWithRole(seller.role) && seller.role === 'SELLER' && seller.active && seller.uid && (
+                          <button
+                            id={`open-session-seller-${seller.id}`}
+                            onClick={() => handleOpenSettlementSession(seller)}
+                            className="cursor-pointer px-2 py-1 text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 rounded transition"
+                            title={lang === 'ar' ? 'فتح جلسة تسوية للبائع' : 'Ouvrir une session de règlement'}
+                          >
+                            {lang === 'ar' ? 'فتح جلسة' : 'Ouvrir session'}
                           </button>
                         )}
                         {canManageUserWithRole(seller.role) ? (

@@ -192,6 +192,15 @@ export class DatabaseService {
     return result;
   }
 
+  static async openSettlementSession(sellerId: string): Promise<any> {
+    requireFirebaseDatabase();
+    if (!isFirebaseConfigured) {
+      throw new Error('FIREBASE_NOT_CONFIGURED: persistent database access is unavailable.');
+    }
+
+    return FirestoreService.openSettlementSession(sellerId);
+  }
+
   static async createSeller(seller: Seller): Promise<void> {
     requireFirebaseDatabase();
     if (isFirebaseConfigured) {
