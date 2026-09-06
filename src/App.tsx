@@ -189,7 +189,21 @@ export default function App() {
     if (!isLoggedIn || authStatus !== 'authenticated' || !workspaceReady) return;
 
     DatabaseService.initialize(activeWorkspace)
-      .then(() => {
+      .then(async () => {
+        try {
+          const syncResult = await DatabaseService.synchronizeOrders();
+          console.log('[ORDER FULL SYNC] Completed:', syncResult);
+        } catch (syncError) {
+          console.error('[ORDER FULL SYNC] Failed:', syncError);
+        }
+
+        try {
+          const cacheCount = await DatabaseService.loadOrderCacheIntoMemory();
+          console.log('[ORDER CACHE] Loaded from IndexedDB:', cacheCount);
+        } catch (cacheError) {
+          console.error('[ORDER CACHE] Failed to load IndexedDB cache:', cacheError);
+        }
+
         refreshAllData();
       })
       .catch((err) => {

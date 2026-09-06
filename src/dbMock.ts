@@ -1,5 +1,11 @@
 import { Seller, Product, Order, SheetsSyncLog, WorkspaceRole } from './types';
 import { FirestoreService } from './utils/FirestoreService';
+import {
+  getCachedOrders,
+  getOrderCacheMeta,
+  putCachedOrders,
+  setOrderCacheMeta
+} from './utils/OrderCache';
 import { isFirebaseConfigured } from './firebase';
 
 // Real-time memory cache
@@ -348,6 +354,249 @@ export class DatabaseService {
     return FirestoreService.getOrderById(id);
   }
 
+  /**
+   * Order Visibility Fix:
+   * Explicit cursor-based pagination for the Orders screen.
+   *
+   * This method is intentionally separate from getOrders(),
+   * which remains the realtime operational cache.
+   */
+  static async getOrdersPage(options: {
+    pageSize?: number;
+    cursor?: {
+      admin?: any | null;
+      seller?: any | null;
+      supervisorOwn?: any | null;
+      supervisorChildren?: any | null;
+    } | null;
+  } = {}): Promise<{
+    orders: Order[];
+    nextCursor: {
+      admin?: any | null;
+      seller?: any | null;
+      supervisorOwn?: any | null;
+      supervisorChildren?: any | null;
+    } | null;
+    hasMore: boolean;
+  }> {
+    requireFirebaseDatabase();
+
+    return FirestoreService.getOrdersPage(options);
+  }
+  /**
+   * B3-C: Initial full synchronization of the authorized order scope.
+   *
+   * Firestore remains the authorization/source-of-truth boundary.
+   * IndexedDB is only a local presentation cache.
+   *
+   * Safety rules:
+   * - Reads only through the existing role-scoped getOrdersPage().
+   * - Continues until hasMore === false.
+   * - Never deletes cached orders because they are absent from a page.
+   * - lastSuccessfulSync is written only after every page succeeds.
+   */
+  static async initialFullOrderSync(): Promise<{
+    ordersSynced: number;
+    pages: number;
+    completedAt: string;
+  }> {
+    requireFirebaseDatabase();
+    const syncStartedAt = new Date().toISOString();
+
+    const syncScope = await FirestoreService.getOrderSyncScope();
+
+    if (!syncScope.uid || !syncScope.sellerId) {
+      throw new Error('ORDER_FULL_SYNC_UNAUTHORIZED');
+    }
+
+    const scope = {
+      uid: syncScope.uid,
+      role: syncScope.role,
+      sellerId: syncScope.sellerId
+    };
+
+    let cursor: {
+      admin?: any | null;
+      seller?: any | null;
+      supervisorOwn?: any | null;
+      supervisorChildren?: any | null;
+    } | null = null;
+
+    let hasMore = true;
+    let pages = 0;
+    let ordersSynced = 0;
+
+    while (hasMore) {
+      const result = await FirestoreService.getOrdersPage({
+        pageSize: 100,
+        cursor
+      });
+
+      pages += 1;
+
+      if (result.orders.length > 0) {
+        await putCachedOrders(scope, result.orders);
+        ordersSynced += result.orders.length;
+      }
+
+      hasMore = result.hasMore;
+      cursor = result.nextCursor;
+    }
+
+    const completedAt = new Date().toISOString();
+
+    await setOrderCacheMeta(scope, syncStartedAt);
+
+    return {
+      ordersSynced,
+      pages,
+      completedAt
+    };
+  }
+  /**
+   * B3-D: Load the complete authorized order cache from IndexedDB.
+   */
+  static async loadOrderCacheIntoMemory(): Promise<number> {
+    requireFirebaseDatabase();
+
+    const syncScope = await FirestoreService.getOrderSyncScope();
+
+    if (!syncScope.uid || !syncScope.sellerId) {
+      throw new Error('ORDER_CACHE_LOAD_UNAUTHORIZED');
+    }
+
+    const scope = {
+      uid: syncScope.uid,
+      role: syncScope.role,
+      sellerId: syncScope.sellerId
+    };
+
+    const cached = await getCachedOrders(scope);
+    cacheOrders = cached;
+
+    if (onChangeCallback) onChangeCallback();
+
+    return cached.length;
+  }
+
+  /**
+   * B4: Incremental synchronization using the last successful
+   * local-cache watermark.
+   *
+   * The watermark advances only after every page succeeds.
+   * It starts at the beginning of this sync cycle so writes occurring
+   * during the cycle remain eligible for the next cycle.
+   */
+  static async incrementalOrderSync(): Promise<{
+    ordersSynced: number;
+    pages: number;
+    startedAt: string;
+    completedAt: string;
+    skipped: boolean;
+  }> {
+    requireFirebaseDatabase();
+
+    const syncScope = await FirestoreService.getOrderSyncScope();
+
+    if (!syncScope.uid || !syncScope.sellerId) {
+      throw new Error('ORDER_INCREMENTAL_SYNC_UNAUTHORIZED');
+    }
+
+    const scope = {
+      uid: syncScope.uid,
+      role: syncScope.role,
+      sellerId: syncScope.sellerId
+    };
+
+    const meta = await getOrderCacheMeta(scope);
+
+    if (!meta?.lastSuccessfulSync) {
+      const now = new Date().toISOString();
+
+      return {
+        ordersSynced: 0,
+        pages: 0,
+        startedAt: now,
+        completedAt: now,
+        skipped: true
+      };
+    }
+
+    const startedAt = new Date().toISOString();
+
+    let cursor: {
+      admin?: any | null;
+      seller?: any | null;
+      supervisorOwn?: any | null;
+      supervisorChildren?: any | null;
+    } | null = null;
+
+    let hasMore = true;
+    let pages = 0;
+    let ordersSynced = 0;
+
+    while (hasMore) {
+      const result =
+        await FirestoreService.getOrdersIncrementalPage({
+          since: meta.lastSuccessfulSync,
+          pageSize: 100,
+          cursor
+        });
+
+      pages += 1;
+
+      if (result.orders.length > 0) {
+        await putCachedOrders(scope, result.orders);
+        ordersSynced += result.orders.length;
+      }
+
+      cursor = result.nextCursor;
+      hasMore = result.hasMore;
+    }
+
+    // Safe watermark:
+    // use the beginning of the cycle, not completion time.
+    // Changes occurring during this cycle remain eligible for the
+    // next incremental synchronization.
+    await setOrderCacheMeta(scope, startedAt);
+
+    await DatabaseService.loadOrderCacheIntoMemory();
+
+    const completedAt = new Date().toISOString();
+
+    return {
+      ordersSynced,
+      pages,
+      startedAt,
+      completedAt,
+      skipped: false
+    };
+  }
+
+  static async synchronizeOrders(): Promise<{
+    mode: 'full' | 'incremental';
+    ordersSynced: number;
+    pages: number;
+  }> {
+    const incremental = await DatabaseService.incrementalOrderSync();
+
+    if (!incremental.skipped) {
+      return {
+        mode: 'incremental',
+        ordersSynced: incremental.ordersSynced,
+        pages: incremental.pages
+      };
+    }
+
+    const full = await DatabaseService.initialFullOrderSync();
+    await DatabaseService.loadOrderCacheIntoMemory();
+
+    return {
+      mode: 'full',
+      ordersSynced: full.ordersSynced,
+      pages: full.pages
+    };
+  }
   static getOrders(): Order[] {
     return cacheOrders;
   }
@@ -470,3 +719,5 @@ export class DatabaseService {
 
 
 }
+
+

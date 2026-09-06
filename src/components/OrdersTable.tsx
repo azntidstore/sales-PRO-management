@@ -69,40 +69,173 @@ export default function OrdersTable({
   // Pagination page size
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  // S5-D-C-C.5.2: explicit historical page state.
-  const [historicalOrders, setHistoricalOrders] = useState<Order[]>([]);
-  const [historicalCursor, setHistoricalCursor] = useState<any | null>(null);
-  const [historicalHasMore, setHistoricalHasMore] = useState(false);
-  const [historicalLoading, setHistoricalLoading] = useState(false);
-  const [historicalMode, setHistoricalMode] = useState(false);
+  // Order Visibility Fix:
+  // The Orders screen uses explicit Firestore cursor pagination.
+  // The realtime cache remains separate and bounded.
+  type OrderPageCursor = {
+    admin?: any | null;
+    seller?: any | null;
+    supervisorOwn?: any | null;
+    supervisorChildren?: any | null;
+  };
+
+  const [orderPage, setOrderPage] = useState<Order[]>([]);
+  const [orderPageCursor, setOrderPageCursor] = useState<OrderPageCursor | null>(null);
+  const [orderPageHistory, setOrderPageHistory] = useState<OrderPageCursor[]>([]);
+  const [orderPageHasMore, setOrderPageHasMore] = useState(false);
+  const [orderPageLoading, setOrderPageLoading] = useState(false);
+  const [orderPageNumber, setOrderPageNumber] = useState(1);
 
 
 
-  const loadHistoricalOrders = async (reset = false) => {
-    if (historicalLoading) return;
-    setHistoricalLoading(true);
+  const loadOrderPage = async (
+    cursor: OrderPageCursor | null = null,
+    reset = false
+  ) => {
+    if (orderPageLoading) return;
+
+    setOrderPageLoading(true);
+
     try {
-      const result = await DatabaseService.loadHistoricalOrderPage({
-        pageSize: 50,
-        cursor: reset ? null : historicalCursor,
-      });
-      setHistoricalOrders(prev => reset ? result.orders : [...prev, ...result.orders]);
-      setHistoricalCursor(result.nextCursor);
-      setHistoricalHasMore(result.hasMore);
-      setHistoricalMode(true);
-      setCurrentPage(1);
+      const hasFilters =
+        Boolean(searchText.trim()) ||
+        Boolean(filterStatus) ||
+        Boolean(filterSeller) ||
+        Boolean(filterProduct) ||
+        Boolean(filterCity) ||
+        Boolean(filterSupervisor) ||
+        Boolean(startDate) ||
+        Boolean(endDate);
+
+      // No filters: preserve the normal bounded 50-document page.
+      if (!hasFilters) {
+        const result = await DatabaseService.getOrdersPage({
+          pageSize: 50,
+          cursor
+        });
+
+        if (!reset && cursor) {
+          setOrderPageHistory(prev => [...prev, orderPageCursor || {}]);
+        } else if (reset) {
+          setOrderPageHistory([]);
+        }
+
+        setOrderPage(result.orders);
+        setOrderPageCursor(result.nextCursor);
+        setOrderPageHasMore(result.hasMore);
+        setOrderPageNumber(prev => reset ? 1 : prev + 1);
+
+        // Keep the legacy local state synchronized with the current page.
+        setOrders(result.orders);
+        return;
+      }
+
+      // Filtered/search mode:
+      // scan authorized Firestore pages, never more than 500 documents
+      // per page request. The existing client-side role/filter logic
+      // remains authoritative after the bounded scan.
+      const MAX_SCANNED_DOCUMENTS = 500;
+      const SCAN_PAGE_SIZE = 50;
+
+      let scanCursor: OrderPageCursor | null = cursor;
+      let scannedDocuments = 0;
+      let scanHasMore = true;
+      const scannedOrders: Order[] = [];
+
+      while (
+        scanHasMore &&
+        scannedDocuments < MAX_SCANNED_DOCUMENTS
+      ) {
+        const result = await DatabaseService.getOrdersPage({
+          pageSize: SCAN_PAGE_SIZE,
+          cursor: scanCursor
+        });
+
+        scannedOrders.push(...result.orders);
+        scannedDocuments += result.orders.length;
+
+        scanCursor = result.nextCursor;
+        scanHasMore = result.hasMore;
+
+        if (result.orders.length === 0) {
+          break;
+        }
+      }
+
+      if (!reset && cursor) {
+        setOrderPageHistory(prev => [...prev, orderPageCursor || {}]);
+      } else if (reset) {
+        setOrderPageHistory([]);
+      }
+
+      setOrderPage(scannedOrders);
+      setOrderPageCursor(scanCursor);
+      setOrderPageHasMore(scanHasMore);
+      setOrderPageNumber(prev => reset ? 1 : prev + 1);
+
+      // Keep the legacy local state synchronized with the bounded scan.
+      setOrders(scannedOrders);
     } catch (error) {
-      console.error('[HistoricalOrders] Failed to load historical orders:', error);
-      toast(lang === 'ar' ? 'تعذر تحميل الطلبات التاريخية' : 'Impossible de charger les commandes historiques', 'error');
+      console.error('[OrderPagination] Failed to load orders:', error);
+
+      toast(
+        lang === 'ar'
+          ? 'تعذر تحميل صفحة الطلبات'
+          : 'Impossible de charger la page des commandes',
+        'error'
+      );
     } finally {
-      setHistoricalLoading(false);
+      setOrderPageLoading(false);
     }
   };
 
+  const resetOrderPagination = async () => {
+    setOrderPageHistory([]);
+    setOrderPageCursor(null);
+    setOrderPageHasMore(false);
+    setOrderPageNumber(1);
+
+    await loadOrderPage(null, true);
+  };
+
+  const loadNextOrderPage = async () => {
+    if (!orderPageHasMore || !orderPageCursor || orderPageLoading) return;
+
+    await loadOrderPage(orderPageCursor, false);
+  };
+
+  const loadPreviousOrderPage = async () => {
+    if (orderPageNumber <= 1 || orderPageLoading) return;
+
+    const previousHistory = [...orderPageHistory];
+
+    previousHistory.pop();
+
+    const previousCursor =
+      previousHistory.length > 0
+        ? previousHistory[previousHistory.length - 1]
+        : null;
+
+    setOrderPageHistory(previousHistory);
+
+    await loadOrderPage(previousCursor, previousCursor === null);
+  };
+  useEffect(() => {
+    void resetOrderPagination();
+  }, [
+    role,
+    currentUser,
+    searchText,
+    filterStatus,
+    filterSeller,
+    filterProduct,
+    filterCity,
+    filterSupervisor,
+    startDate,
+    endDate
+  ]);
   const getFilteredRoleOrders = (): Order[] => {
-    let rawOrders = historicalMode
-      ? historicalOrders
-      : DatabaseService.getOrders();
+    const rawOrders = orderPage;
     if (role === 'SELLER') {
       return rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
     } else if (role === 'SUPERVISOR') {
@@ -293,7 +426,7 @@ export default function OrdersTable({
     setUniqueSellers(slrs);
     setUniqueProducts(prds);
     setUniqueCities(cts);
-  }, [role, currentUser, dataTrigger, historicalMode, historicalOrders]);
+  }, [role, currentUser, dataTrigger]);
 
   // Soft refresh
   const triggerRefresh = () => {
@@ -438,18 +571,17 @@ export default function OrdersTable({
     return 0;
   });
 
-  // Pagination Logic
-  const indexOfLastRow = currentPage * rowsPerPage;
-  const indexOfFirstRow = indexOfLastRow - rowsPerPage;
-  const currentRows = sortedOrders.slice(indexOfFirstRow, indexOfLastRow);
-  const totalPages = Math.ceil(sortedOrders.length / rowsPerPage) || 1;
-
-  // Sync back to first page if filters changes page count
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(1);
-    }
-  }, [searchText, filterStatus, filterSeller, filterProduct, filterCity, startDate, endDate, totalPages]);
+  /*
+   * The Orders screen is paginated by Firestore.
+   * Do NOT paginate this page again locally.
+   *
+   * sortedOrders represents the complete currently loaded Firestore page.
+   * The Firestore previous/next controls are the only page navigation.
+   */
+  const currentRows = sortedOrders;
+  const indexOfFirstRow = 0;
+  const indexOfLastRow = sortedOrders.length;
+  const totalPages = 1;
 
   const handleSort = (field: keyof Order) => {
     if (sortField === field) {
@@ -607,42 +739,37 @@ export default function OrdersTable({
   return (
     <div id="orders-table-wrapper" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs transition-colors p-6">
       <div className="flex flex-wrap items-center gap-2 mb-4" dir="rtl" data-s5-history-controls>
-        {!historicalMode ? (
+        <div className="flex flex-wrap items-center gap-2" data-order-pagination>
           <button
             type="button"
-            onClick={() => void loadHistoricalOrders(true)}
-            disabled={historicalLoading}
+            onClick={() => void loadPreviousOrderPage()}
+            disabled={orderPageNumber === 1 || orderPageLoading}
             className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium disabled:opacity-50"
           >
-            {historicalLoading ? 'جاري تحميل التاريخ...' : 'تحميل الطلبات التاريخية'}
+            {lang === 'ar' ? 'السابق' : 'Précédent'}
           </button>
-        ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                setHistoricalMode(false);
-                setHistoricalOrders([]);
-                setHistoricalCursor(null);
-                setHistoricalHasMore(false);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium"
-            >
-              العودة للطلبات الحالية
-            </button>
-            {historicalHasMore && (
-              <button
-                type="button"
-                onClick={() => void loadHistoricalOrders(false)}
-                disabled={historicalLoading}
-                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium disabled:opacity-50"
-              >
-                {historicalLoading ? 'جاري التحميل...' : 'تحميل المزيد'}
-              </button>
-            )}
-          </>
-        )}
+
+          <span className="px-3 py-2 text-sm font-semibold text-slate-600 dark:text-slate-300">
+            {lang === 'ar'
+              ? 'الصفحة'
+              : 'Page'}
+          </span>
+
+          <button
+            type="button"
+            onClick={() => void loadNextOrderPage()}
+            disabled={!orderPageHasMore || orderPageLoading}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium disabled:opacity-50"
+          >
+            {lang === 'ar' ? 'التالي' : 'Suivant'}
+          </button>
+
+          {orderPageLoading && (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {lang === 'ar' ? 'جاري التحميل...' : 'Chargement...'}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6 border-b border-slate-100 dark:border-slate-800 pb-5">
@@ -1141,54 +1268,10 @@ export default function OrdersTable({
         </table>
       </div>
 
-      {/* PAGINATION CONTROLS */}
-      {sortedOrders.length > 0 && (
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 border-t border-slate-100 dark:border-slate-800 pt-4">
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-450">
-            <span>{t.rowsPerPage}</span>
-            <select
-              id="rows-per-page-select"
-              value={rowsPerPage}
-              onChange={e => {
-                setRowsPerPage(parseInt(e.target.value));
-                setCurrentPage(1);
-              }}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 py-1 px-1.5 rounded-md focus:outline-hidden text-xs cursor-pointer"
-            >
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="25">25</option>
-              <option value="50">50</option>
-            </select>
-          </div>
-
-          <div className="text-xs text-slate-500 dark:text-slate-450">
-            <span>{indexOfFirstRow + 1}</span> - <span>{Math.min(indexOfLastRow, sortedOrders.length)}</span> {t.of} <span>{sortedOrders.length}</span>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              id="prev-page-btn"
-              disabled={currentPage === 1}
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              className="p-1.5 border border-slate-205 dark:border-slate-800 rounded bg-white dark:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4 rtl:rotate-180" />
-            </button>
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300 px-2.5">
-              {currentPage} / {totalPages}
-            </span>
-            <button
-              id="next-page-btn"
-              disabled={currentPage === totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              className="p-1.5 border border-slate-205 dark:border-slate-800 rounded bg-white dark:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed text-slate-600 dark:text-slate-350 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer"
-            >
-              <ChevronRight className="w-4 h-4 rtl:rotate-180" />
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
+
+
+
+

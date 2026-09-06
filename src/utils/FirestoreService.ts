@@ -621,58 +621,508 @@ export class FirestoreService {
    * authorization scope is the union of two queries and requires a cursor
    * merge design that cannot safely discard unconsumed documents.
    */
-  static async getOrdersPage(
-    pageSize = 50,
-    cursor?: QueryDocumentSnapshot<DocumentData>
-  ): Promise<{ orders: Order[]; nextCursor: QueryDocumentSnapshot<DocumentData> | null }> {
-    const safePageSize = Math.max(1, Math.min(100, Math.floor(pageSize)));
+  /**
+   * Order Visibility Fix:
+   * Cursor-based order pagination for the Orders screen.
+   *
+   * IMPORTANT:
+   * - This is NOT a realtime listener.
+   * - It does NOT replace onOrdersChange().
+   * - It never performs writes/deletes.
+   * - It preserves role-scoped Firestore reads.
+   * - It reads at most the requested page size per call.
+   *
+   * Supervisor scope is a union of:
+   *   1. supervisor's own seller orders
+   *   2. child seller orders assigned to this supervisor
+   *
+   * A single Firestore cursor cannot safely represent that union.
+   * Therefore supervisor pagination uses two independent cursors and
+   * merges the two ordered streams deterministically.
+   */
+  /**
+   * Complete role-scoped order pagination.
+   *
+   * IMPORTANT:
+   * - Read-only.
+   * - Never deletes or modifies orders.
+   * - The Orders screen uses this paged source instead of the
+   *   bounded realtime cache.
+   * - Supervisor scope is the union of:
+   *     A) own seller orders
+   *     B) orders explicitly assigned to this supervisor
+   *   Each stream has an independent cursor.
+   */
+  /**
+   * B3-C: Returns the minimum authorization context required
+   * by the local order synchronization layer.
+   *
+   * Authorization remains owned by FirestoreService.
+   * IndexedDB is only a local presentation cache and never
+   * acts as an authorization boundary.
+   */
+  static async getOrderSyncScope(): Promise<{
+    uid: string;
+    role: WorkspaceRole;
+    sellerId: string;
+  }> {
     const profile = await this.getAuthorizationProfile();
-    if (!profile) return { orders: [], nextCursor: null };
 
-    let baseQuery;
-    if (profile.role === 'SELLER') {
-      baseQuery = query(
-        collection(db, 'orders'),
-        where('sellerId', '==', profile.sellerId),
-        orderBy('createdAt', 'desc'),
-        limit(safePageSize)
-      );
-    } else if (profile.role === 'ADMIN' || profile.role === 'DEPUTY') {
-      baseQuery = query(
-        collection(db, 'orders'),
-        orderBy('createdAt', 'desc'),
-        limit(safePageSize)
-      );
-    } else {
-      throw new Error('ORDER_PAGINATION_SCOPE_UNSUPPORTED');
+    if (!profile?.active || !profile.uid || !profile.sellerId) {
+      throw new Error('ORDER_FULL_SYNC_UNAUTHORIZED');
     }
 
-    const pagedQuery = cursor ? query(baseQuery, startAfter(cursor)) : baseQuery;
-    const snapshot = await getDocs(pagedQuery);
-    const orders = snapshot.docs.map((snap) => {
-      const item = snap.data() as Order;
-      return { ...item, id: item.id || snap.id };
-    });
+    return {
+      uid: profile.uid,
+      role: profile.role,
+      sellerId: profile.sellerId
+    };
+  }
+  /**
+   * B4: Incremental role-scoped order synchronization.
+   *
+   * Reads only orders whose server-canonical updatedAt is greater than
+   * or equal to the supplied watermark.
+   *
+   * Firestore remains the authorization/source-of-truth boundary.
+   * This method performs reads only.
+   */
+  static async getOrdersIncrementalPage(options: {
+    since: string;
+    pageSize?: number;
+    cursor?: {
+      admin?: QueryDocumentSnapshot<DocumentData> | null;
+      seller?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorOwn?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorChildren?: QueryDocumentSnapshot<DocumentData> | null;
+    } | null;
+  }): Promise<{
+    orders: Order[];
+    hasMore: boolean;
+    nextCursor: {
+      admin?: QueryDocumentSnapshot<DocumentData> | null;
+      seller?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorOwn?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorChildren?: QueryDocumentSnapshot<DocumentData> | null;
+    } | null;
+  }> {
+    const safePageSize = Math.max(
+      1,
+      Math.min(
+        100,
+        Math.floor(
+          Number.isFinite(options.pageSize)
+            ? Number(options.pageSize)
+            : 100
+        )
+      )
+    );
+
+    if (!options.since || Number.isNaN(Date.parse(options.since))) {
+      throw new Error('ORDER_INCREMENTAL_SYNC_INVALID_WATERMARK');
+    }
+
+    const syncScope = await FirestoreService.getOrderSyncScope();
+
+    if (!syncScope.uid || !syncScope.sellerId) {
+      throw new Error('ORDER_INCREMENTAL_SYNC_UNAUTHORIZED');
+    }
+
+    const base = collection(db, 'orders');
+
+    const mapDocs = (
+      docs: QueryDocumentSnapshot<DocumentData>[]
+    ): Order[] =>
+      docs.map((snap) => ({
+        id: snap.id,
+        ...snap.data()
+      } as Order));
+
+    // ------------------------------------------------
+    // SUPERVISOR
+    // ------------------------------------------------
+    if (syncScope.role === 'SUPERVISOR') {
+      const ownCursor = options.cursor?.supervisorOwn || null;
+      const assignedCursor = options.cursor?.supervisorChildren || null;
+
+      const ownConstraints: any[] = [
+        where('sellerId', '==', syncScope.sellerId),
+        where('updatedAt', '>=', options.since),
+        orderBy('updatedAt', 'asc'),
+        limit(safePageSize)
+      ];
+
+      const assignedConstraints: any[] = [
+        where('assignedSupervisorId', '==', syncScope.sellerId),
+        where('updatedAt', '>=', options.since),
+        orderBy('updatedAt', 'asc'),
+        limit(safePageSize)
+      ];
+
+      if (ownCursor) {
+        ownConstraints.push(startAfter(ownCursor));
+      }
+
+      if (assignedCursor) {
+        assignedConstraints.push(startAfter(assignedCursor));
+      }
+
+      const [ownSnapshot, assignedSnapshot] = await Promise.all([
+        getDocs(query(base, ...ownConstraints)),
+        getDocs(query(base, ...assignedConstraints))
+      ]);
+
+      const ownDocs = ownSnapshot.docs;
+      const assignedDocs = assignedSnapshot.docs;
+
+      const merged = new Map<string, Order>();
+
+      for (const snap of [...ownDocs, ...assignedDocs]) {
+        if (!merged.has(snap.id)) {
+          merged.set(snap.id, {
+            id: snap.id,
+            ...snap.data()
+          } as Order);
+        }
+      }
+
+      const orders = Array.from(merged.values()).sort((a, b) =>
+        String(a.updatedAt || '').localeCompare(
+          String(b.updatedAt || '')
+        )
+      );
+
+      return {
+        orders,
+        hasMore:
+          ownDocs.length === safePageSize ||
+          assignedDocs.length === safePageSize,
+        nextCursor: {
+          supervisorOwn:
+            ownDocs.length === safePageSize
+              ? ownDocs[ownDocs.length - 1] || ownCursor
+              : null,
+          supervisorChildren:
+            assignedDocs.length === safePageSize
+              ? assignedDocs[assignedDocs.length - 1] || assignedCursor
+              : null
+        }
+      };
+    }
+
+    // ------------------------------------------------
+    // SELLER / ADMIN / DEPUTY
+    // ------------------------------------------------
+
+    const constraints: any[] = [
+      where('updatedAt', '>=', options.since),
+      orderBy('updatedAt', 'asc'),
+      limit(safePageSize)
+    ];
+
+    if (syncScope.role === 'SELLER') {
+      constraints.unshift(
+        where('sellerId', '==', syncScope.sellerId)
+      );
+    } else if (
+      syncScope.role !== 'ADMIN' &&
+      syncScope.role !== 'DEPUTY'
+    ) {
+      throw new Error('ORDER_INCREMENTAL_SYNC_SCOPE_UNSUPPORTED');
+    }
+
+    const cursor =
+      syncScope.role === 'SELLER'
+        ? options.cursor?.seller || null
+        : options.cursor?.admin || null;
+
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+
+    const snapshot = await getDocs(
+      query(base, ...constraints)
+    );
+
+    const docs = snapshot.docs;
 
     return {
-      orders,
-      nextCursor: snapshot.docs.length === safePageSize
-        ? snapshot.docs[snapshot.docs.length - 1]
-        : null
+      orders: mapDocs(docs),
+      hasMore: docs.length === safePageSize,
+      nextCursor:
+        syncScope.role === 'SELLER'
+          ? {
+              seller:
+                docs.length === safePageSize
+                  ? docs[docs.length - 1] || cursor
+                  : null
+            }
+          : {
+              admin:
+                docs.length === safePageSize
+                  ? docs[docs.length - 1] || cursor
+                  : null
+            }
     };
   }
 
-  /**
-   * S5-D-C-C.5.9
-   * Cost-safe prototype for complete Dashboard `all` scalar metrics.
-   *
-   * This method is intentionally not wired into Dashboard yet. It uses
-   * Firestore aggregation queries instead of downloading every historical
-   * order document. Supervisor scope is the union of assigned-supervisor
-   * orders excluding the supervisor's own seller orders, plus the user's own
-   * seller orders. This avoids an intersection query that Firestore Rules
-   * cannot prove as safe while still preventing double counting.
-   */
+  static async getOrdersPage(options: {
+    pageSize?: number;
+    cursor?: {
+      admin?: QueryDocumentSnapshot<DocumentData> | null;
+      seller?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorOwn?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorChildren?: QueryDocumentSnapshot<DocumentData> | null;
+    } | null;
+  } = {}): Promise<{
+    orders: Order[];
+    nextCursor: {
+      admin?: QueryDocumentSnapshot<DocumentData> | null;
+      seller?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorOwn?: QueryDocumentSnapshot<DocumentData> | null;
+      supervisorChildren?: QueryDocumentSnapshot<DocumentData> | null;
+    } | null;
+    hasMore: boolean;
+  }> {
+    const safePageSize = Math.max(
+      1,
+      Math.min(
+        100,
+        Math.floor(
+          Number.isFinite(options.pageSize)
+            ? Number(options.pageSize)
+            : 50
+        )
+      )
+    );
+
+    const profile = await this.getAuthorizationProfile();
+
+    if (!profile?.active || !profile.sellerId) {
+      return {
+        orders: [],
+        nextCursor: null,
+        hasMore: false
+      };
+    }
+
+    const base = collection(db, 'orders');
+
+    const toOrder = (
+      snap: QueryDocumentSnapshot<DocumentData>
+    ): Order => {
+      const item = snap.data() as Order;
+      return {
+        ...item,
+        id: item.id || snap.id
+      };
+    };
+
+    const getCreatedAt = (order: Order): string => {
+      if (typeof order.createdAt === 'string') return order.createdAt;
+      if (order.createdAt && typeof order.createdAt === 'object' && 'toDate' in order.createdAt) {
+        try {
+          return (order.createdAt as any).toDate().toISOString();
+        } catch {
+          return '';
+        }
+      }
+      return '';
+    };
+
+    const compareOrders = (a: Order, b: Order): number => {
+      const dateCompare = getCreatedAt(b).localeCompare(getCreatedAt(a));
+      if (dateCompare !== 0) return dateCompare;
+      return a.id.localeCompare(b.id);
+    };
+
+    // ------------------------------------------------
+    // SELLER
+    // ------------------------------------------------
+
+    if (profile.role === 'SELLER') {
+      const cursor = options.cursor?.seller || null;
+
+      const constraints: any[] = [
+        where('sellerId', '==', profile.sellerId),
+        orderBy('createdAt', 'desc'),
+        limit(safePageSize + 1)
+      ];
+
+      if (cursor) {
+        constraints.push(startAfter(cursor));
+      }
+
+      const snapshot = await getDocs(query(base, ...constraints));
+      const pageDocs = snapshot.docs.slice(0, safePageSize);
+      const orders = pageDocs.map(toOrder);
+      const hasMore = snapshot.docs.length > safePageSize;
+
+      return {
+        orders,
+        nextCursor: hasMore
+          ? { seller: pageDocs[pageDocs.length - 1] }
+          : null,
+        hasMore
+      };
+    }
+
+    // ------------------------------------------------
+    // ADMIN / DEPUTY
+    // ------------------------------------------------
+
+    if (profile.role === 'ADMIN' || profile.role === 'DEPUTY') {
+      const cursor = options.cursor?.admin || null;
+
+      const constraints: any[] = [
+        orderBy('createdAt', 'desc'),
+        limit(safePageSize + 1)
+      ];
+
+      if (cursor) {
+        constraints.push(startAfter(cursor));
+      }
+
+      const snapshot = await getDocs(query(base, ...constraints));
+      const pageDocs = snapshot.docs.slice(0, safePageSize);
+      const orders = pageDocs.map(toOrder);
+      const hasMore = snapshot.docs.length > safePageSize;
+
+      return {
+        orders,
+        nextCursor: hasMore
+          ? { admin: pageDocs[pageDocs.length - 1] }
+          : null,
+        hasMore
+      };
+    }
+
+    // ------------------------------------------------
+    // SUPERVISOR
+    // ------------------------------------------------
+
+    if (profile.role === 'SUPERVISOR') {
+      /*
+       * Authorization scope MUST match the existing rules/listener:
+       *
+       * A) sellerId == supervisor's sellerId
+       * B) assignedSupervisorId == supervisor's sellerId
+       *
+       * Never substitute hierarchy/child-seller discovery here.
+       */
+
+      const ownCursor = options.cursor?.supervisorOwn || null;
+      const assignedCursor = options.cursor?.supervisorChildren || null;
+
+      const ownConstraints: any[] = [
+        where('sellerId', '==', profile.sellerId),
+        orderBy('createdAt', 'desc'),
+        limit(safePageSize + 1)
+      ];
+
+      const assignedConstraints: any[] = [
+        where('assignedSupervisorId', '==', profile.sellerId),
+        orderBy('createdAt', 'desc'),
+        limit(safePageSize + 1)
+      ];
+
+      if (ownCursor) {
+        ownConstraints.push(startAfter(ownCursor));
+      }
+
+      if (assignedCursor) {
+        assignedConstraints.push(startAfter(assignedCursor));
+      }
+
+      const [ownSnapshot, assignedSnapshot] = await Promise.all([
+        getDocs(query(base, ...ownConstraints)),
+        getDocs(query(base, ...assignedConstraints))
+      ]);
+
+      const ownDocs = ownSnapshot.docs.slice(0, safePageSize);
+      const assignedDocs = assignedSnapshot.docs.slice(0, safePageSize);
+
+      /*
+       * Merge both ordered streams deterministically.
+       * A document may belong to both scopes, so deduplicate by Firestore id.
+       */
+      const merged = new Map<string, {
+        order: Order;
+        source: 'own' | 'assigned';
+        index: number;
+      }>();
+
+      ownDocs.forEach((snap, index) => {
+        merged.set(snap.id, {
+          order: toOrder(snap),
+          source: 'own',
+          index
+        });
+      });
+
+      assignedDocs.forEach((snap, index) => {
+        if (!merged.has(snap.id)) {
+          merged.set(snap.id, {
+            order: toOrder(snap),
+            source: 'assigned',
+            index
+          });
+        }
+      });
+
+      const mergedEntries = Array.from(merged.values())
+        .sort((a, b) => compareOrders(a.order, b.order));
+
+      /*
+       * We deliberately fetch up to pageSize from each stream.
+       * The next cursor advances only to the last document actually
+       * consumed from each stream. This prevents skipping documents.
+       */
+      const consumed = mergedEntries.slice(0, safePageSize);
+
+      const ownConsumed = consumed
+        .filter(entry => entry.source === 'own')
+        .map(entry => entry.order.id);
+
+      const assignedConsumed = consumed
+        .filter(entry => entry.source === 'assigned')
+        .map(entry => entry.order.id);
+
+      const ownLastId = ownConsumed[ownConsumed.length - 1];
+      const assignedLastId = assignedConsumed[assignedConsumed.length - 1];
+
+      const ownLastDoc = ownLastId
+        ? ownDocs.find(docSnap => docSnap.id === ownLastId) || null
+        : null;
+
+      const assignedLastDoc = assignedLastId
+        ? assignedDocs.find(docSnap => docSnap.id === assignedLastId) || null
+        : null;
+
+      const ownHasUnconsumed =
+        ownDocs.length > ownConsumed.length ||
+        ownSnapshot.docs.length > safePageSize;
+
+      const assignedHasUnconsumed =
+        assignedDocs.length > assignedConsumed.length ||
+        assignedSnapshot.docs.length > safePageSize;
+
+      const hasMore = ownHasUnconsumed || assignedHasUnconsumed;
+
+      return {
+        orders: consumed.map(entry => entry.order),
+        nextCursor: hasMore
+          ? {
+              supervisorOwn: ownLastDoc || ownCursor,
+              supervisorChildren: assignedLastDoc || assignedCursor
+            }
+          : null,
+        hasMore
+      };
+    }
+
+    throw new Error('ORDER_PAGINATION_SCOPE_UNSUPPORTED');
+  }
   static async getDashboardAllAggregates(): Promise<{
     complete: boolean;
     orders: number;
@@ -979,3 +1429,6 @@ export class FirestoreService {
 
 
 }
+
+
+

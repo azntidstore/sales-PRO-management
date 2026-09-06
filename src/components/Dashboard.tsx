@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Order, Language, UserRole } from '../types';
 import { translations } from '../locales';
 import { DatabaseService } from '../dbMock';
@@ -119,6 +119,8 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
     void loadRange();
     return () => { cancelled = true; };
   }, [dateFilter, lang]);
+
+
 
   const filteredOrders = useMemo(() => {
     if ((dateFilter === 'today' || dateFilter === 'this_month' || dateFilter === 'last_30_days') && dashboardRangeOrders) return dashboardRangeOrders;
