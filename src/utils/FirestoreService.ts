@@ -23,6 +23,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Seller, Product, Order, SheetsSyncLog, AuthorizationProfile, WorkspaceRole } from '../types';
+import { AuthService } from './AuthService';
 
 // Helper to sanitize data before sending to Firestore (removes undefined values which Firestore setDoc rejects)
 export function sanitizeForFirestore<T>(data: T): T {
@@ -179,20 +180,58 @@ export class FirestoreService {
     return () => { stopped = true; unsubs.forEach(u => u()); };
   }
 
-  static async createSeller(seller: Seller): Promise<void> {
-    const pIds = Array.isArray(seller.parentIds)
-      ? seller.parentIds.filter(Boolean)
-      : (seller.parentId ? [seller.parentId] : []);
-    const directParent = seller.parentId || (pIds.length > 0 ? pIds[0] : '');
-    const sanitizedSeller: Record<string, any> = {
-      ...seller,
-      id: seller.id,
-      name: seller.name || '',
-      phone: seller.phone || '',
-      parentId: directParent,
-      parentIds: pIds
+  /**
+   * B4-C: Seller account provisioning.
+   *
+   * Firebase Authentication is server-managed through /api/sellers.
+   * The client never creates or stores seller passwords.
+   */
+  static async provisionSellerAccount(seller: Seller): Promise<{ uid: string; authCreated: boolean }> {
+    if (!auth?.currentUser) {
+      throw new Error('AUTH_REQUIRED');
+    }
+
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/sellers', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ seller }),
+    });
+
+    let payload: any = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok || !payload?.ok || !payload?.uid) {
+      throw new Error(payload?.error || `SELLER_PROVISIONING_FAILED_${response.status}`);
+    }
+
+    try {
+      await AuthService.sendPasswordReset(seller.email || seller.username || '');
+    } catch (resetError) {
+      console.warn('[SELLER PROVISIONING] Account linked, but password reset email failed:', resetError);
+    }
+
+    return {
+      uid: payload.uid,
+      authCreated: payload.authCreated === true,
     };
-    await setDoc(doc(db, 'sellers', seller.id), sanitizeForFirestore(sanitizedSeller));
+  }
+
+  static async createSeller(seller: Seller): Promise<void> {
+    const provisioned = await this.provisionSellerAccount(seller);
+
+    // Keep the local object consistent with the server-canonical UID.
+    // Firestore is already updated by the provisioning API.
+    if (!seller.uid && provisioned.uid) {
+      seller.uid = provisioned.uid;
+    }
   }
 
   static async updateSeller(id: string, patch: Partial<Seller>): Promise<void> {
@@ -678,15 +717,6 @@ export class FirestoreService {
       sellerId: profile.sellerId
     };
   }
-  /**
-   * B4: Incremental role-scoped order synchronization.
-   *
-   * Reads only orders whose server-canonical updatedAt is greater than
-   * or equal to the supplied watermark.
-   *
-   * Firestore remains the authorization/source-of-truth boundary.
-   * This method performs reads only.
-   */
   static async getOrdersIncrementalPage(options: {
     since: string;
     pageSize?: number;
@@ -698,171 +728,74 @@ export class FirestoreService {
     } | null;
   }): Promise<{
     orders: Order[];
-    hasMore: boolean;
     nextCursor: {
       admin?: QueryDocumentSnapshot<DocumentData> | null;
       seller?: QueryDocumentSnapshot<DocumentData> | null;
       supervisorOwn?: QueryDocumentSnapshot<DocumentData> | null;
       supervisorChildren?: QueryDocumentSnapshot<DocumentData> | null;
     } | null;
+    hasMore: boolean;
   }> {
-    const safePageSize = Math.max(
-      1,
-      Math.min(
-        100,
-        Math.floor(
-          Number.isFinite(options.pageSize)
-            ? Number(options.pageSize)
-            : 100
-        )
-      )
-    );
-
-    if (!options.since || Number.isNaN(Date.parse(options.since))) {
+    if (typeof options?.since !== 'string' || Number.isNaN(Date.parse(options.since))) {
       throw new Error('ORDER_INCREMENTAL_SYNC_INVALID_WATERMARK');
     }
 
-    const syncScope = await FirestoreService.getOrderSyncScope();
-
-    if (!syncScope.uid || !syncScope.sellerId) {
-      throw new Error('ORDER_INCREMENTAL_SYNC_UNAUTHORIZED');
-    }
-
+    const safePageSize = Math.max(1, Math.min(100, Math.floor(
+      Number.isFinite(options.pageSize) ? Number(options.pageSize) : 100
+    )));
+    const syncScope = await this.getOrderSyncScope();
     const base = collection(db, 'orders');
 
-    const mapDocs = (
-      docs: QueryDocumentSnapshot<DocumentData>[]
-    ): Order[] =>
-      docs.map((snap) => ({
-        id: snap.id,
-        ...snap.data()
-      } as Order));
+    const toOrder = (snap: QueryDocumentSnapshot<DocumentData>): Order => ({
+      ...(snap.data() as Order),
+      id: (snap.data() as Order).id || snap.id
+    });
 
-    // ------------------------------------------------
-    // SUPERVISOR
-    // ------------------------------------------------
+    const fetchStream = async (
+      field: 'sellerId' | 'assignedSupervisorId' | null,
+      cursor: QueryDocumentSnapshot<DocumentData> | null | undefined
+    ) => {
+      const constraints: any[] = [];
+      if (field) constraints.push(where(field, '==', syncScope.sellerId));
+      constraints.push(where('updatedAt', '>=', options.since));
+      constraints.push(orderBy('updatedAt', 'asc'));
+      if (cursor) constraints.push(startAfter(cursor));
+      constraints.push(limit(safePageSize));
+      const snapshot = await getDocs(query(base, ...constraints));
+      return {
+        docs: snapshot.docs,
+        orders: snapshot.docs.map(toOrder),
+        hasMore: snapshot.docs.length === safePageSize,
+        nextCursor: snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : null
+      };
+    };
+
     if (syncScope.role === 'SUPERVISOR') {
-      const ownCursor = options.cursor?.supervisorOwn || null;
-      const assignedCursor = options.cursor?.supervisorChildren || null;
-
-      const ownConstraints: any[] = [
-        where('sellerId', '==', syncScope.sellerId),
-        where('updatedAt', '>=', options.since),
-        orderBy('updatedAt', 'asc'),
-        limit(safePageSize)
-      ];
-
-      const assignedConstraints: any[] = [
-        where('assignedSupervisorId', '==', syncScope.sellerId),
-        where('updatedAt', '>=', options.since),
-        orderBy('updatedAt', 'asc'),
-        limit(safePageSize)
-      ];
-
-      if (ownCursor) {
-        ownConstraints.push(startAfter(ownCursor));
-      }
-
-      if (assignedCursor) {
-        assignedConstraints.push(startAfter(assignedCursor));
-      }
-
-      const [ownSnapshot, assignedSnapshot] = await Promise.all([
-        getDocs(query(base, ...ownConstraints)),
-        getDocs(query(base, ...assignedConstraints))
-      ]);
-
-      const ownDocs = ownSnapshot.docs;
-      const assignedDocs = assignedSnapshot.docs;
-
+      const own = await fetchStream('sellerId', options.cursor?.supervisorOwn);
+      const children = await fetchStream('assignedSupervisorId', options.cursor?.supervisorChildren);
       const merged = new Map<string, Order>();
-
-      for (const snap of [...ownDocs, ...assignedDocs]) {
-        if (!merged.has(snap.id)) {
-          merged.set(snap.id, {
-            id: snap.id,
-            ...snap.data()
-          } as Order);
-        }
-      }
-
-      const orders = Array.from(merged.values()).sort((a, b) =>
-        String(a.updatedAt || '').localeCompare(
-          String(b.updatedAt || '')
-        )
+      [...own.orders, ...children.orders].forEach(order => merged.set(order.id, order));
+      const orders = [...merged.values()].sort((a, b) =>
+        String(a.updatedAt || '').localeCompare(String(b.updatedAt || ''))
       );
-
       return {
         orders,
-        hasMore:
-          ownDocs.length === safePageSize ||
-          assignedDocs.length === safePageSize,
         nextCursor: {
-          supervisorOwn:
-            ownDocs.length === safePageSize
-              ? ownDocs[ownDocs.length - 1] || ownCursor
-              : null,
-          supervisorChildren:
-            assignedDocs.length === safePageSize
-              ? assignedDocs[assignedDocs.length - 1] || assignedCursor
-              : null
-        }
+          supervisorOwn: own.hasMore ? own.nextCursor : null,
+          supervisorChildren: children.hasMore ? children.nextCursor : null
+        },
+        hasMore: own.hasMore || children.hasMore
       };
     }
 
-    // ------------------------------------------------
-    // SELLER / ADMIN / DEPUTY
-    // ------------------------------------------------
-
-    const constraints: any[] = [
-      where('updatedAt', '>=', options.since),
-      orderBy('updatedAt', 'asc'),
-      limit(safePageSize)
-    ];
-
-    if (syncScope.role === 'SELLER') {
-      constraints.unshift(
-        where('sellerId', '==', syncScope.sellerId)
-      );
-    } else if (
-      syncScope.role !== 'ADMIN' &&
-      syncScope.role !== 'DEPUTY'
-    ) {
-      throw new Error('ORDER_INCREMENTAL_SYNC_SCOPE_UNSUPPORTED');
-    }
-
-    const cursor =
-      syncScope.role === 'SELLER'
-        ? options.cursor?.seller || null
-        : options.cursor?.admin || null;
-
-    if (cursor) {
-      constraints.push(startAfter(cursor));
-    }
-
-    const snapshot = await getDocs(
-      query(base, ...constraints)
-    );
-
-    const docs = snapshot.docs;
-
+    const field = syncScope.role === 'SELLER' ? 'sellerId' : null;
+    const stream = await fetchStream(field, syncScope.role === 'SELLER' ? options.cursor?.seller : options.cursor?.admin);
     return {
-      orders: mapDocs(docs),
-      hasMore: docs.length === safePageSize,
-      nextCursor:
-        syncScope.role === 'SELLER'
-          ? {
-              seller:
-                docs.length === safePageSize
-                  ? docs[docs.length - 1] || cursor
-                  : null
-            }
-          : {
-              admin:
-                docs.length === safePageSize
-                  ? docs[docs.length - 1] || cursor
-                  : null
-            }
+      orders: stream.orders,
+      nextCursor: syncScope.role === 'SELLER'
+        ? { seller: stream.hasMore ? stream.nextCursor : null }
+        : { admin: stream.hasMore ? stream.nextCursor : null },
+      hasMore: stream.hasMore
     };
   }
 
@@ -1429,6 +1362,7 @@ export class FirestoreService {
 
 
 }
+
 
 
 

@@ -1,6 +1,7 @@
 import { Seller, Product, Order, SheetsSyncLog, WorkspaceRole } from './types';
 import { FirestoreService } from './utils/FirestoreService';
 import {
+  deleteCachedOrders,
   getCachedOrders,
   getOrderCacheMeta,
   putCachedOrders,
@@ -189,7 +190,7 @@ export class DatabaseService {
         throw err;
       }
     }
-    cacheSellers = [...cacheSellers, seller];
+    cacheSellers = [...cacheSellers, { ...seller }];
     if (onChangeCallback) onChangeCallback();
   }
 
@@ -401,8 +402,8 @@ export class DatabaseService {
     completedAt: string;
   }> {
     requireFirebaseDatabase();
-    const syncStartedAt = new Date().toISOString();
 
+    const syncStartedAt = new Date().toISOString();
     const syncScope = await FirestoreService.getOrderSyncScope();
 
     if (!syncScope.uid || !syncScope.sellerId) {
@@ -453,9 +454,6 @@ export class DatabaseService {
       completedAt
     };
   }
-  /**
-   * B3-D: Load the complete authorized order cache from IndexedDB.
-   */
   static async loadOrderCacheIntoMemory(): Promise<number> {
     requireFirebaseDatabase();
 
@@ -478,101 +476,80 @@ export class DatabaseService {
 
     return cached.length;
   }
-
   /**
-   * B4: Incremental synchronization using the last successful
-   * local-cache watermark.
-   *
-   * The watermark advances only after every page succeeds.
-   * It starts at the beginning of this sync cycle so writes occurring
-   * during the cycle remain eligible for the next cycle.
+   * B4: Incremental synchronization from the last successful watermark.
+   * Reads only documents whose trusted server updatedAt is at/after the watermark.
+   * The watermark advances only after every requested page has been cached.
    */
   static async incrementalOrderSync(): Promise<{
+    skipped: boolean;
     ordersSynced: number;
     pages: number;
     startedAt: string;
     completedAt: string;
-    skipped: boolean;
   }> {
     requireFirebaseDatabase();
 
     const syncScope = await FirestoreService.getOrderSyncScope();
-
-    if (!syncScope.uid || !syncScope.sellerId) {
-      throw new Error('ORDER_INCREMENTAL_SYNC_UNAUTHORIZED');
-    }
-
     const scope = {
       uid: syncScope.uid,
       role: syncScope.role,
       sellerId: syncScope.sellerId
     };
-
     const meta = await getOrderCacheMeta(scope);
 
     if (!meta?.lastSuccessfulSync) {
-      const now = new Date().toISOString();
-
       return {
+        skipped: true,
         ordersSynced: 0,
         pages: 0,
-        startedAt: now,
-        completedAt: now,
-        skipped: true
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString()
       };
     }
 
     const startedAt = new Date().toISOString();
-
     let cursor: {
       admin?: any | null;
       seller?: any | null;
       supervisorOwn?: any | null;
       supervisorChildren?: any | null;
     } | null = null;
-
     let hasMore = true;
     let pages = 0;
     let ordersSynced = 0;
 
     while (hasMore) {
-      const result =
-        await FirestoreService.getOrdersIncrementalPage({
-          since: meta.lastSuccessfulSync,
-          pageSize: 100,
-          cursor
-        });
-
+      const result = await FirestoreService.getOrdersIncrementalPage({
+        since: meta.lastSuccessfulSync,
+        pageSize: 100,
+        cursor
+      });
       pages += 1;
-
       if (result.orders.length > 0) {
         await putCachedOrders(scope, result.orders);
         ordersSynced += result.orders.length;
       }
-
-      cursor = result.nextCursor;
       hasMore = result.hasMore;
+      cursor = result.nextCursor;
     }
 
-    // Safe watermark:
-    // use the beginning of the cycle, not completion time.
-    // Changes occurring during this cycle remain eligible for the
-    // next incremental synchronization.
     await setOrderCacheMeta(scope, startedAt);
-
     await DatabaseService.loadOrderCacheIntoMemory();
 
-    const completedAt = new Date().toISOString();
-
     return {
+      skipped: false,
       ordersSynced,
       pages,
       startedAt,
-      completedAt,
-      skipped: false
+      completedAt: new Date().toISOString()
     };
   }
 
+  /**
+   * B4 wiring: use a one-time full sync for a new cache, then incremental syncs.
+   * The caller does not need to know which phase is required.
+   */
   static async synchronizeOrders(): Promise<{
     mode: 'full' | 'incremental';
     ordersSynced: number;
@@ -607,6 +584,9 @@ export class DatabaseService {
       try {
         const created = await FirestoreService.createOrder(order);
         cacheOrders = [...cacheOrders, created];
+        // B4-C-PERSIST-CREATE
+        const scope = await FirestoreService.getOrderSyncScope();
+        await putCachedOrders(scope, [created]);
         if (onChangeCallback) onChangeCallback();
         return created;
       } catch (err: any) {
@@ -634,6 +614,9 @@ export class DatabaseService {
       try {
         const updated = await FirestoreService.updateOrder(id, patch, expectedUpdatedAt);
         cacheOrders = cacheOrders.map(o => o.id === id ? updated : o);
+        // B4-C-PERSIST-UPDATE
+        const scope = await FirestoreService.getOrderSyncScope();
+        await putCachedOrders(scope, [updated]);
         if (onChangeCallback) onChangeCallback();
         return updated;
       } catch (err: any) {
@@ -659,6 +642,9 @@ export class DatabaseService {
       }
     }
     cacheOrders = cacheOrders.filter(o => o.id !== id);
+    // B4-C-PERSIST-DELETE
+    const scope = await FirestoreService.getOrderSyncScope();
+    await deleteCachedOrders(scope, [id]);
     if (onChangeCallback) onChangeCallback();
   }
 
@@ -719,5 +705,6 @@ export class DatabaseService {
 
 
 }
+
 
 
