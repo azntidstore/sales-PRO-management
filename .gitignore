@@ -17,3 +17,5 @@ s4-reports/
 s5-reports/
 docs/archive/security-history/
 *.zip
+.vercel
+.env*
