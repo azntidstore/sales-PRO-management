@@ -1,9 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Seller, Product, Order, OrderStatus, Language, UserRole } from '../types';
-import { DatabaseService, calculateOrderProfit } from '../dbMock';
+import { Seller, Product, Order, OrderItem, OrderStatus, Language, UserRole } from '../types';
+import { DatabaseService } from '../dbMock';
+import {
+  calculateExpectedMultiProductTotalAmount,
+  calculateExpectedTotalAmount,
+  calculateMultiProductOrderProfit,
+  calculateOrderItemsSubtotal,
+  calculateOrderProfit,
+  isValidOrderItems,
+  roundMoney
+} from '../utils/orderFinancials';
 import { translations } from '../locales';
 import { findSellerByName } from '../utils/sellerUtils';
 import { X, Calendar, User, Phone, MapPin, Layers, ShoppingBag, DollarSign, StickyNote, Activity, RefreshCw } from 'lucide-react';
+import { auth } from '../firebase';
 
 interface Props {
   isOpen: boolean;
@@ -39,13 +49,33 @@ export default function OrderFormModal({
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
   const [address, setAddress] = useState('');
-  const [quantity, setQuantity] = useState<string>(''); // empty by default
-  const [productId, setProductId] = useState('');
+  const [quantity, setQuantity] = useState<string>(''); // legacy single-product field
+  const [productId, setProductId] = useState(''); // legacy single-product field
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [deliveryCost, setDeliveryCost] = useState<string>('35');
   const [totalAmount, setTotalAmount] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [orderStatus, setOrderStatus] = useState<OrderStatus>('PENDING');
   const [assignedSupervisorId, setAssignedSupervisorId] = useState<string>('');
+
+  const selectedPreviewProduct = products.find(p => p.id === productId);
+  const previewBaseQuantity = parseFloat(quantity) || 0;
+  const previewBaseItem: OrderItem | null = selectedPreviewProduct && previewBaseQuantity > 0
+    ? {
+        productId: selectedPreviewProduct.id,
+        productNameSnapshot: selectedPreviewProduct.productName,
+        wholesalePriceSnapshot: selectedPreviewProduct.wholesalePrice,
+        sellingPriceSnapshot: selectedPreviewProduct.sellingPrice,
+        quantity: previewBaseQuantity
+      }
+    : null;
+  const previewItems = previewBaseItem
+    ? [previewBaseItem, ...orderItems.filter(item => item.productId !== previewBaseItem.productId)]
+    : orderItems;
+  const orderItemsSubtotal = previewItems.length > 0 && isValidOrderItems(previewItems)
+    ? calculateOrderItemsSubtotal(previewItems)
+    : 0;
+
 
   const getEligibleSupervisors = (): Seller[] => {
     if (!sellerName) return [];
@@ -98,7 +128,7 @@ export default function OrderFormModal({
   useEffect(() => {
     // Collect active sellers/products
     setSellers(DatabaseService.getSellers().filter(s => s.active));
-    setProducts(DatabaseService.getProducts().filter(p => p.active));
+    setProducts(DatabaseService.getOrderEligibleProducts());
 
     // Ensure scroll is at the top when modal opens
     if (isOpen) {
@@ -123,9 +153,12 @@ export default function OrderFormModal({
       setDeliveryCost(editingOrder.deliveryCost.toString());
       setTotalAmount(editingOrder.totalAmount.toString());
       setAssignedSupervisorId(editingOrder.assignedSupervisorId || '');
+      setOrderItems(editingOrder.items?.length ? editingOrder.items.map(item => ({ ...item })) : []);
 
-      // Match product name to find ProductID if needed
-      const foundProd = DatabaseService.getProducts().find(p => p.productName === editingOrder.product);
+      // S3: prefer the canonical productId; legacy orders are kept compatible
+      // and are not silently backfilled with current prices.
+      const foundProd = DatabaseService.getProducts().find(p => p.id === editingOrder.productId)
+        || DatabaseService.getProducts().find(p => p.productName === editingOrder.product);
       if (foundProd) {
         setProductId(foundProd.id);
       } else {
@@ -144,7 +177,8 @@ export default function OrderFormModal({
       setOrderStatus('PENDING');
       setDeliveryCost('35'); // standard default
       setTotalAmount('');
-      
+      setOrderItems([]);
+
       // Auto select current seller if seller is logged in
       const sellersList = DatabaseService.getSellers().filter(s => s.active);
       const activeSellersObj = findSellerByName(sellersList, currentUser);
@@ -184,7 +218,7 @@ export default function OrderFormModal({
       }
 
       // Auto select first active product
-      const activeProds = DatabaseService.getProducts().filter(p => p.active);
+      const activeProds = DatabaseService.getOrderEligibleProducts();
       if (activeProds.length > 0) {
         setProductId(activeProds[0].id);
       } else {
@@ -193,26 +227,77 @@ export default function OrderFormModal({
     }
   }, [editingOrder, isOpen, currentUser]);
 
-  // Handle default total calculation once when Product changes (only in Create mode to suggest a default)
+  // E3-C: derive the customer total from immutable price snapshots for all
+  // products in the current form. The input remains editable for now, but
+  // submit recalculates the canonical value instead of trusting manual input.
   useEffect(() => {
-    if (!editingOrder && productId) {
-      const selectedProduct = DatabaseService.getProducts().find(p => p.id === productId);
-      if (selectedProduct) {
-        const qty = parseFloat(quantity) || 0;
-        const dCost = parseFloat(deliveryCost) || 0;
-        const basePrice = selectedProduct.sellingPrice * qty;
-        if (qty > 0) {
-          setTotalAmount((basePrice + dCost).toString());
-        } else {
-          setTotalAmount('');
-        }
+    if (!editingOrder && previewItems.length > 0 && isValidOrderItems(previewItems)) {
+      const dCost = parseFloat(deliveryCost) || 0;
+      if (dCost >= 0 && Number.isFinite(dCost)) {
+        setTotalAmount(calculateExpectedMultiProductTotalAmount(previewItems, dCost).toString());
       }
     }
-  }, [productId, quantity, deliveryCost, editingOrder]);
+  }, [productId, quantity, deliveryCost, editingOrder, orderItems]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const addProductToOrder = () => {
+    const firstAvailable = products.find(p => p.id !== productId && !orderItems.some(item => item.productId === p.id));
+    if (!firstAvailable) {
+      toast(
+        lang === 'ar' ? '⚠️ لا توجد منتجات أخرى متاحة للإضافة.' : '⚠️ Aucun autre produit disponible à ajouter.',
+        'info'
+      );
+      return;
+    }
+    if (orderItems.length >= 49) {
+      toast(
+        lang === 'ar' ? '⚠️ الحد الأقصى هو 50 منتجاً مختلفاً في الطلبية.' : '⚠️ Une commande est limitée à 50 produits différents.',
+        'error'
+      );
+      return;
+    }
+    setOrderItems(prev => [
+      ...prev,
+      {
+        productId: firstAvailable.id,
+        productNameSnapshot: firstAvailable.productName,
+        wholesalePriceSnapshot: firstAvailable.wholesalePrice,
+        sellingPriceSnapshot: firstAvailable.sellingPrice,
+        quantity: 1
+      }
+    ]);
+  };
+
+  const removeProductFromOrder = (productIdToRemove: string) => {
+    setOrderItems(prev => prev.filter(item => item.productId !== productIdToRemove));
+  };
+
+  const updateOrderItem = (index: number, productIdValue: string, quantityValue: number) => {
+    const selected = products.find(p => p.id === productIdValue);
+    if (!selected) return;
+    if (productIdValue === productId || orderItems.some((item, itemIndex) => itemIndex !== index && item.productId === productIdValue)) {
+      toast(
+        lang === 'ar' ? '⚠️ لا يمكن تكرار نفس المنتج داخل الطلبية.' : '⚠️ Le même produit ne peut pas être répété dans la commande.',
+        'error'
+      );
+      return;
+    }
+    setOrderItems(prev => prev.map((item, itemIndex) => itemIndex === index
+      ? {
+          productId: selected.id,
+          productNameSnapshot: selected.productName,
+          wholesalePriceSnapshot: selected.wholesalePrice,
+          sellingPriceSnapshot: selected.sellingPrice,
+          quantity: quantityValue
+        }
+      : item));
+  };
+
+  const originalOrderHasItems = (order: Order): order is Order & { items: OrderItem[] } =>
+    Array.isArray(order.items) && order.items.length > 0;
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Permissions check
@@ -227,26 +312,56 @@ export default function OrderFormModal({
     }
 
     // Input validations
-    if (!customerName.trim() || !phone.trim() || !city.trim() || !productId) {
+    if (!customerName.trim() || !phone.trim() || !city.trim()) {
       toast(t.fieldRequired, 'error');
       return;
     }
 
-    const parsedQty = parseFloat(quantity) || 0;
-    if (parsedQty <= 0) {
-      toast(lang === 'ar' ? '⚠️ يرجى إدخال كمية صالحة أكبر من 0' : '⚠️ Veuillez entrer une quantité valide supérieure à 0', 'error');
+
+    const currentProducts = DatabaseService.getProducts();
+    const effectiveProductId = productId;
+    if (!effectiveProductId) {
+      toast(t.fieldRequired, 'error');
       return;
     }
 
-    const parsedDelivery = parseFloat(deliveryCost) || 0;
-    const parsedTotal = parseFloat(totalAmount) || 0;
-
-    const currentProducts = DatabaseService.getProducts();
-    const selectedProd = currentProducts.find(p => p.id === productId);
+    const selectedProd = currentProducts.find(p => p.id === effectiveProductId);
     if (!selectedProd) {
       toast(lang === 'ar' ? 'يرجى اختيار منتج صالح' : 'Sélectionnez un produit valide', 'error');
       return;
     }
+
+    const parsedQty = parseFloat(quantity) || 0;
+    if (parsedQty <= 0 || !Number.isFinite(parsedQty)) {
+      toast(lang === 'ar' ? '⚠️ يرجى إدخال كمية صالحة أكبر من 0' : '⚠️ Veuillez entrer une quantité valide supérieure à 0', 'error');
+      return;
+    }
+
+    const parsedDelivery = roundMoney(parseFloat(deliveryCost));
+    if (!Number.isFinite(parsedDelivery) || parsedDelivery < 0) {
+      toast(lang === 'ar' ? '⚠️ يرجى إدخال تكلفة توصيل صالحة وغير سالبة' : '⚠️ Veuillez saisir un coût de livraison valide et non négatif', 'error');
+      return;
+    }
+
+    const baseItem: OrderItem = {
+      productId: selectedProd.id,
+      productNameSnapshot: selectedProd.productName,
+      wholesalePriceSnapshot: selectedProd.wholesalePrice,
+      sellingPriceSnapshot: selectedProd.sellingPrice,
+      quantity: parsedQty
+    };
+    const financialItems = !editingOrder && orderItems.length > 0
+      ? [baseItem, ...orderItems.filter(item => item.productId !== baseItem.productId)]
+      : [baseItem];
+
+    if (!isValidOrderItems(financialItems)) {
+      toast(lang === 'ar' ? '⚠️ بيانات المنتجات أو الكميات غير صالحة.' : '⚠️ Les produits ou quantités de la commande sont invalides.', 'error');
+      return;
+    }
+
+    const parsedTotal = editingOrder && originalOrderHasItems(editingOrder)
+      ? calculateExpectedMultiProductTotalAmount(editingOrder.items!, parsedDelivery)
+      : calculateExpectedMultiProductTotalAmount(financialItems, parsedDelivery);
 
     // Supervisor validation: if seller has multiple supervisors, assigned supervisor is mandatory!
     const eligibleSups = getEligibleSupervisors();
@@ -262,55 +377,83 @@ export default function OrderFormModal({
 
     const effectiveSupervisorId = assignedSupervisorId || (eligibleSups.length === 1 ? eligibleSups[0].id : undefined);
 
-    // Profit calculation: 
-    // Profit = TotalAmount - DeliveryCost - (WholesalePrice * Quantity) if Delivered, else 0
-    const profit = calculateOrderProfit(
-      selectedProd.wholesalePrice,
-      selectedProd.sellingPrice,
-      parsedQty,
-      parsedDelivery,
-      parsedTotal,
-      orderStatus
-    );
+    // E3-C: one canonical financial path for modern orders. Existing modern
+    // snapshots are reused during edit; the UI never re-prices historical items.
+    const profit = editingOrder && originalOrderHasItems(editingOrder)
+      ? calculateMultiProductOrderProfit(editingOrder.items, orderStatus)
+      : calculateOrderProfit(
+          selectedProd.wholesalePrice,
+          selectedProd.sellingPrice,
+          parsedQty,
+          parsedDelivery,
+          parsedTotal,
+          orderStatus
+        );
 
     const orders = DatabaseService.getOrders();
     const orderDateClean = orderDate || new Date().toISOString().split('T')[0];
+    const selectedSeller = findSellerByName(DatabaseService.getSellers(), sellerName);
+    const currentUid = auth?.currentUser?.uid;
 
     if (editingOrder) {
       // Edit mode
-      const updatedOrders = orders.map(o => {
-        if (o.id === editingOrder.id) {
-          return {
-            ...o,
-            orderDate: orderDateClean,
-            sellerName,
-            customerName: customerName.trim(),
-            phone: phone.trim(),
-            city: city.trim(),
-            address: address.trim(),
-            quantity: parsedQty,
-            product: selectedProd.productName,
-            deliveryCost: parsedDelivery,
-            totalAmount: parsedTotal,
-            notes: notes.trim(),
-            orderStatus,
-            profit,
-            assignedSupervisorId: effectiveSupervisorId,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return o;
-      });
+      const originalOrder = editingOrder;
+      const modern = Boolean(
+        originalOrder.items?.length
+        || (originalOrder.productId
+          && typeof originalOrder.productNameSnapshot === 'string'
+          && typeof originalOrder.wholesalePriceSnapshot === 'number'
+          && typeof originalOrder.sellingPriceSnapshot === 'number')
+      );
+      const financialFields = modern
+        ? {
+            productId: selectedProd.id,
+            productNameSnapshot: originalOrder.productId === selectedProd.id ? originalOrder.productNameSnapshot : selectedProd.productName,
+            wholesalePriceSnapshot: originalOrder.productId === selectedProd.id ? originalOrder.wholesalePriceSnapshot : selectedProd.wholesalePrice,
+            sellingPriceSnapshot: originalOrder.productId === selectedProd.id ? originalOrder.sellingPriceSnapshot : selectedProd.sellingPrice,
+            sellerNameSnapshot: originalOrder.sellerId === selectedSeller?.id ? (originalOrder.sellerNameSnapshot || selectedSeller?.name || sellerName) : (selectedSeller?.name || sellerName),
+            items: originalOrder.items?.length ? originalOrder.items : undefined,
+            productIds: originalOrder.items?.length ? originalOrder.items.map(item => item.productId) : undefined,
+            profit
+          }
+        : { profit: originalOrder.profit };
 
-      DatabaseService.saveOrders(updatedOrders);
-      DatabaseService.triggerNotification('order_updated', currentUser, {
-        titleAr: 'تحديث طلبية',
-        titleFr: 'Commande mise à jour',
-        titleEn: 'Order Updated',
-        ar: `قام المستخدم "${currentUser}" بتعديل الطلبية الخاصة بالزبون "${customerName.trim()}". الحالة الحالية: ${orderStatus}.`,
-        fr: `L'utilisateur "${currentUser}" a mis à jour la commande du client "${customerName.trim()}". Statut actuel: ${orderStatus}.`,
-        en: `User "${currentUser}" updated the order for client "${customerName.trim()}". Current status: ${orderStatus}.`
-      });
+      const patch: Partial<Order> = {
+        orderDate: orderDateClean,
+        sellerName,
+        customerName: customerName.trim(),
+        phone: phone.trim(),
+        city: city.trim(),
+        address: address.trim(),
+        quantity: parsedQty,
+        product: selectedProd.productName,
+        deliveryCost: parsedDelivery,
+        totalAmount: parsedTotal,
+        notes: notes.trim(),
+        orderStatus,
+        ...financialFields,
+        sellerId: selectedSeller?.id || originalOrder.sellerId,
+        assignedSupervisorId: effectiveSupervisorId,
+        updatedAt: new Date().toISOString()
+      };
+
+      // Historical creator identity is not inferred during edits. If it already exists, preserve it untouched.
+      if (originalOrder.createdByUid) patch.createdByUid = originalOrder.createdByUid;
+      try {
+        await DatabaseService.updateOrder(originalOrder.id, patch, originalOrder.updatedAt);
+      } catch (err: any) {
+        if (err?.message === 'ORDER_CONCURRENCY_CONFLICT') {
+          toast(
+            lang === 'ar'
+              ? '⚠️ لم يتم حفظ التعديل لأن الطلبية تغيّرت من مستخدم آخر. حدّث البيانات ثم أعد المحاولة.'
+              : '⚠️ La commande a été modifiée par un autre utilisateur. Actualisez les données puis réessayez.',
+            'error'
+          );
+          return;
+        }
+        throw err;
+      }
+
       toast(t.orderUpdatedSuccess, 'success');
     } else {
       // Create mode
@@ -324,27 +467,28 @@ export default function OrderFormModal({
         address: address.trim(),
         quantity: parsedQty,
         product: selectedProd.productName,
+        productId: selectedProd.id,
+        productNameSnapshot: selectedProd.productName,
+        wholesalePriceSnapshot: selectedProd.wholesalePrice,
+        sellingPriceSnapshot: selectedProd.sellingPrice,
+        items: financialItems,
+        productIds: financialItems.map(item => item.productId),
+        sellerNameSnapshot: selectedSeller?.name || sellerName,
         deliveryCost: parsedDelivery,
         totalAmount: parsedTotal,
         notes: notes.trim(),
         orderStatus,
         profit,
         createdBy: currentUser,
+        sellerId: selectedSeller?.id,
+        createdByUid: currentUid,
         assignedSupervisorId: effectiveSupervisorId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
 
-      orders.push(newOrder);
-      DatabaseService.saveOrders(orders);
-      DatabaseService.triggerNotification('order_created', currentUser, {
-        titleAr: 'إضافة طلبية جديدة',
-        titleFr: 'Nouvelle commande créée',
-        titleEn: 'New Order Created',
-        ar: `تم تسجيل طلبية جديدة للزبون "${customerName.trim()}" بقيمة ${parsedTotal} MAD بواسطة "${currentUser}".`,
-        fr: `Une nouvelle commande pour le client "${customerName.trim()}" d'une valeur de ${parsedTotal} MAD a été créée par "${currentUser}".`,
-        en: `A new order for client "${customerName.trim()}" worth ${parsedTotal} MAD was created by "${currentUser}".`
-      });
+      await DatabaseService.createOrder(newOrder);
+
       toast(t.orderCreatedSuccess, 'success');
     }
 
@@ -357,7 +501,7 @@ export default function OrderFormModal({
   return (
     <div id="order-form-backdrop" className="fixed inset-0 z-50 overflow-y-auto p-3 sm:p-4 bg-black/60 backdrop-blur-xs transition-opacity duration-200 flex justify-center items-start sm:items-center">
       <div id="order-form-container" className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-800 p-4 sm:p-6 md:p-8 animate-in fade-in zoom-in-95 duration-150 my-2 sm:my-8 shrink-0">
-        
+
         {/* Header */}
         <div className="flex justify-between items-center pb-4 mb-6 border-b border-slate-100 dark:border-slate-800">
           <div>
@@ -380,7 +524,7 @@ export default function OrderFormModal({
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            
+
             {/* Order Date */}
             <div id="order-date-field-container" className="w-full block">
               <div className="flex items-center justify-between mb-1.5">
@@ -440,7 +584,7 @@ export default function OrderFormModal({
                 {lang === 'ar' ? 'المشرف المسؤول عن هذه الطلبية' : 'Superviseur responsable de cette commande'}*
               </label>
               <p className="text-[11px] text-slate-400 dark:text-slate-500 font-semibold">
-                {lang === 'ar' 
+                {lang === 'ar'
                   ? 'بما أن البائع مرتبط بأكثر من مشرف واحد، يرجى تحديد المشرف المسؤول عن هذه الطلبية لتوجيهها إليه وتجنب تكرارها لدى البقية.'
                   : 'Puisque le vendeur est lié à plusieurs superviseurs, veuillez spécifier le superviseur responsable de cette commande.'}
               </p>
@@ -461,8 +605,8 @@ export default function OrderFormModal({
               </select>
               {(!!editingOrder && role !== 'ADMIN' && role !== 'DEPUTY') && (
                 <p className="text-[10px] text-amber-600 dark:text-amber-400 font-bold mt-1">
-                  ⚠️ {lang === 'ar' 
-                    ? 'تعديل المشرف المسؤول متاح فقط لنائب المدير أو المدير العام.' 
+                  ⚠️ {lang === 'ar'
+                    ? 'تعديل المشرف المسؤول متاح فقط لنائب المدير أو المدير العام.'
                     : 'La modification du superviseur est réservée au directeur adjoint ou supérieur.'}
                 </p>
               )}
@@ -541,51 +685,100 @@ export default function OrderFormModal({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Product selection */}
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
+          {/* Products — E3-B multi-product entry UI */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
                 <ShoppingBag className="w-3.5 h-3.5 text-slate-400" />
                 {t.product}*
               </label>
-              <select
-                id="order-product-select"
-                required
-                value={productId}
-                onChange={e => setProductId(e.target.value)}
-                className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
-              >
-                {products.length === 0 ? (
-                  <option value="">{lang === 'ar' ? 'لا يوجد منتجات نشطة' : 'Aucun produit actif'}</option>
-                ) : (
-                  products.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.productName} ({p.sellingPrice.toLocaleString()} MAD)
-                    </option>
-                  ))
-                )}
-              </select>
+              {!editingOrder && (
+                <button
+                  type="button"
+                  onClick={addProductToOrder}
+                  disabled={orderItems.length >= 49}
+                  className="text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  + {lang === 'ar' ? 'إضافة منتج' : 'Ajouter un produit'}
+                </button>
+              )}
             </div>
 
-            {/* Quantity */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-slate-400" />
-                {t.quantity}*
-              </label>
-              <input
-                id="order-quantity-input"
-                type="number"
-                inputMode="decimal"
-                step="any"
-                min="0.001"
-                required
-                value={quantity}
-                onChange={e => setQuantity(e.target.value)}
-                placeholder={lang === 'ar' ? 'مثال: 1 أو 0.5' : 'Ex: 1 ou 0.5'}
-                className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+            {editingOrder || orderItems.length === 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
+                  <select
+                    id="order-product-select"
+                    required
+                    value={productId}
+                    onChange={e => setProductId(e.target.value)}
+                    className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2.5 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  >
+                    {products.length === 0 ? (
+                      <option value="">{lang === 'ar' ? 'لا يوجد منتجات نشطة' : 'Aucun produit actif'}</option>
+                    ) : (
+                      products.map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.productName} ({p.sellingPrice.toLocaleString()} MAD)
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <div>
+                  <input
+                    id="order-quantity-input"
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
+                    min="0.001"
+                    required
+                    value={quantity}
+                    onChange={e => setQuantity(e.target.value)}
+                    placeholder={lang === 'ar' ? 'الكمية' : 'Quantité'}
+                    className="w-full text-sm bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {orderItems.map((item, index) => (
+                  <div key={`${item.productId}-${index}`} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                    <select
+                      aria-label={`${t.product} ${index + 1}`}
+                      value={item.productId}
+                      onChange={e => updateOrderItem(index, e.target.value, item.quantity)}
+                      className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    >
+                      {products.filter(p => p.id === item.productId || !orderItems.some(other => other.productId === p.id)).map(p => (
+                        <option key={p.id} value={p.id}>{p.productName} ({p.sellingPrice.toLocaleString()} MAD)</option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label={`${t.quantity} ${index + 1}`}
+                      type="number"
+                      min="0.001"
+                      step="any"
+                      value={item.quantity}
+                      onChange={e => updateOrderItem(index, item.productId, parseFloat(e.target.value) || 0)}
+                      className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeProductFromOrder(item.productId)}
+                      className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
+                      aria-label={lang === 'ar' ? 'حذف المنتج' : 'Supprimer le produit'}
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+                <div className="flex justify-between text-xs font-bold text-slate-500 dark:text-slate-400">
+                  <span>{lang === 'ar' ? 'عدد المنتجات المختلفة' : 'Produits différents'}: {Math.min(orderItems.length + 1, 50)}/50</span>
+                  <span>{lang === 'ar' ? 'المجموع الفرعي' : 'Sous-total'}: {roundMoney(orderItemsSubtotal).toLocaleString()} MAD</span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-850">

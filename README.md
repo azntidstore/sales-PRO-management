@@ -1,20 +1,8 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# E3-G-E — Settlement / Invoice / Archive Validation
 
-# Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/bfad3cf0-6c9d-46f7-af11-1e01539b1a9a
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+- Session close now stores canonical delivered-order sales as settlementAmount.
+- Closed sessions contain an immutable invoice snapshot.
+- Closed-session archive retrieval is restricted to ADMIN/DEPUTY through the trusted API.
+- Direct Firestore browser access to settlementSessions is denied.
+- Added composite indexes for session lookup and session-scoped order aggregation.
+- No migration, deletion, or persistent listener.

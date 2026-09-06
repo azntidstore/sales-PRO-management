@@ -69,9 +69,40 @@ export default function OrdersTable({
   // Pagination page size
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  // S5-D-C-C.5.2: explicit historical page state.
+  const [historicalOrders, setHistoricalOrders] = useState<Order[]>([]);
+  const [historicalCursor, setHistoricalCursor] = useState<any | null>(null);
+  const [historicalHasMore, setHistoricalHasMore] = useState(false);
+  const [historicalLoading, setHistoricalLoading] = useState(false);
+  const [historicalMode, setHistoricalMode] = useState(false);
+
+
+
+  const loadHistoricalOrders = async (reset = false) => {
+    if (historicalLoading) return;
+    setHistoricalLoading(true);
+    try {
+      const result = await DatabaseService.loadHistoricalOrderPage({
+        pageSize: 50,
+        cursor: reset ? null : historicalCursor,
+      });
+      setHistoricalOrders(prev => reset ? result.orders : [...prev, ...result.orders]);
+      setHistoricalCursor(result.nextCursor);
+      setHistoricalHasMore(result.hasMore);
+      setHistoricalMode(true);
+      setCurrentPage(1);
+    } catch (error) {
+      console.error('[HistoricalOrders] Failed to load historical orders:', error);
+      toast(lang === 'ar' ? 'تعذر تحميل الطلبات التاريخية' : 'Impossible de charger les commandes historiques', 'error');
+    } finally {
+      setHistoricalLoading(false);
+    }
+  };
 
   const getFilteredRoleOrders = (): Order[] => {
-    let rawOrders = DatabaseService.getOrders();
+    let rawOrders = historicalMode
+      ? historicalOrders
+      : DatabaseService.getOrders();
     if (role === 'SELLER') {
       return rawOrders.filter(o => isSameSellerName(o.sellerName, currentUser));
     } else if (role === 'SUPERVISOR') {
@@ -262,7 +293,7 @@ export default function OrdersTable({
     setUniqueSellers(slrs);
     setUniqueProducts(prds);
     setUniqueCities(cts);
-  }, [role, currentUser, dataTrigger]);
+  }, [role, currentUser, dataTrigger, historicalMode, historicalOrders]);
 
   // Soft refresh
   const triggerRefresh = () => {
@@ -270,7 +301,7 @@ export default function OrdersTable({
   };
 
 
-  const handleDeleteOrder = (id: string, sellerName: string) => {
+  const handleDeleteOrder = async (id: string, sellerName: string) => {
     if (role === 'PUBLIC') {
       toast(t.permissionDeniedError, 'error');
       return;
@@ -284,18 +315,8 @@ export default function OrdersTable({
     if (deleteConfirmId === id) {
       const original = DatabaseService.getOrders();
       const deletedOrder = original.find(o => o.id === id);
-      const updated = original.filter(o => o.id !== id);
-      DatabaseService.saveOrders(updated);
-      if (deletedOrder) {
-        DatabaseService.triggerNotification('order_deleted', currentUser, {
-          titleAr: 'حذف طلبية',
-          titleFr: 'Commande supprimée',
-          titleEn: 'Order Deleted',
-          ar: `قام المستخدم "${currentUser}" بحذف الطلبية الخاصة بالزبون "${deletedOrder.customerName}".`,
-          fr: `L'utilisateur "${currentUser}" a supprimé la commande du client "${deletedOrder.customerName}".`,
-          en: `User "${currentUser}" deleted the order of client "${deletedOrder.customerName}".`
-        });
-      }
+      await DatabaseService.deleteOrder(id);
+      const updated = DatabaseService.getOrders();
       setOrders(updated);
       toast(t.orderDeletedSuccess, 'success');
       onDataChange();
@@ -308,7 +329,7 @@ export default function OrdersTable({
     }
   };
 
-  const handleInlineStatusChange = (orderId: string, newStatus: string) => {
+  const handleInlineStatusChange = async (orderId: string, newStatus: string) => {
     if (role !== 'ADMIN' && role !== 'DEPUTY' && role !== 'SUPERVISOR') {
       toast(t.permissionDeniedError, 'error');
       return;
@@ -320,44 +341,28 @@ export default function OrdersTable({
 
     const orderObj = rawOrders[orderIndex];
     
-    // Recalculate profit based on product
-    const allProducts = DatabaseService.getProducts();
-    const selectedProd = allProducts.find(p => p.productName === orderObj.product);
-    
-    let calculatedProfit = 0;
-    if (selectedProd) {
-      if (newStatus === 'DELIVERED') {
-        const wholesalePrice = selectedProd.wholesalePrice;
-        calculatedProfit = orderObj.totalAmount - (wholesalePrice * orderObj.quantity) - orderObj.deliveryCost;
-      } else {
-        calculatedProfit = 0;
-      }
-    } else {
-      if (newStatus === 'DELIVERED') {
-        calculatedProfit = orderObj.profit || 0;
-      } else {
-        calculatedProfit = 0;
-      }
-    }
-
-    const updatedOrder = {
-      ...orderObj,
+    // E3-E: profit is now calculated authoritatively by the trusted server API.
+    // The client sends only the requested status change and concurrency version.
+    const orderPatch: Partial<Order> = {
       orderStatus: newStatus as any,
-      profit: calculatedProfit,
       updatedAt: new Date().toISOString()
     };
+    let updatedOrder: Order;
+    try {
+      updatedOrder = await DatabaseService.updateOrder(orderId, orderPatch, orderObj.updatedAt);
+    } catch (err: any) {
+      if (err?.message === 'ORDER_CONCURRENCY_CONFLICT') {
+        toast(
+          lang === 'ar'
+            ? '⚠️ لم يتم تحديث الحالة لأن الطلبية تغيّرت من مستخدم آخر. حدّث البيانات ثم أعد المحاولة.'
+            : '⚠️ Le statut n’a pas été mis à jour car la commande a changé. Actualisez puis réessayez.',
+          'error'
+        );
+        return;
+      }
+      throw err;
+    }
 
-    rawOrders[orderIndex] = updatedOrder;
-    DatabaseService.saveOrders(rawOrders);
-
-    DatabaseService.triggerNotification('order_updated', currentUser, {
-      titleAr: 'تحديث حالة طلبية',
-      titleFr: 'Statut de commande mis à jour',
-      titleEn: 'Order Status Updated',
-      ar: `قام المستخدم "${currentUser}" بتحديث حالة الطلبية للزبون "${orderObj.customerName}" إلى: ${newStatus}.`,
-      fr: `L'utilisateur "${currentUser}" a mis à jour le statut de la commande de "${orderObj.customerName}" à : ${newStatus}.`,
-      en: `User "${currentUser}" updated the order status of "${orderObj.customerName}" to: ${newStatus}.`
-    });
     
     // Trigger synchronous or background push sync to Google Sheets
     try {
@@ -366,7 +371,7 @@ export default function OrdersTable({
       console.error('[SyncError] Failed inline sheet sync:', syncErr);
     }
 
-    setOrders(rawOrders);
+    setOrders(DatabaseService.getOrders());
 
     toast(lang === 'ar' ? 'تم تحديث حالة الطلبية والربح ومزامنتها بنجاح' : 'Statut mis à jour, profit recalculé et synchronisé', 'success');
     onDataChange();
@@ -601,6 +606,45 @@ export default function OrdersTable({
 
   return (
     <div id="orders-table-wrapper" className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs transition-colors p-6">
+      <div className="flex flex-wrap items-center gap-2 mb-4" dir="rtl" data-s5-history-controls>
+        {!historicalMode ? (
+          <button
+            type="button"
+            onClick={() => void loadHistoricalOrders(true)}
+            disabled={historicalLoading}
+            className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium disabled:opacity-50"
+          >
+            {historicalLoading ? 'جاري تحميل التاريخ...' : 'تحميل الطلبات التاريخية'}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setHistoricalMode(false);
+                setHistoricalOrders([]);
+                setHistoricalCursor(null);
+                setHistoricalHasMore(false);
+                setCurrentPage(1);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium"
+            >
+              العودة للطلبات الحالية
+            </button>
+            {historicalHasMore && (
+              <button
+                type="button"
+                onClick={() => void loadHistoricalOrders(false)}
+                disabled={historicalLoading}
+                className="px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 text-sm font-medium disabled:opacity-50"
+              >
+                {historicalLoading ? 'جاري التحميل...' : 'تحميل المزيد'}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6 border-b border-slate-100 dark:border-slate-800 pb-5">
         <div>
           <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">

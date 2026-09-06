@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Order, Language, UserRole } from '../types';
 import { translations } from '../locales';
 import { DatabaseService } from '../dbMock';
@@ -71,8 +71,57 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
 
   // Dynamic date state filtering
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'this_month' | 'last_30_days'>('all');
+  const [dashboardRangeOrders, setDashboardRangeOrders] = useState<Order[] | null>(null);
+  const [dashboardRangeLoading, setDashboardRangeLoading] = useState(false);
+  const [dashboardRangeError, setDashboardRangeError] = useState<string | null>(null);
+  const dashboardUsesCompleteRange = (dateFilter === 'today' || dateFilter === 'this_month' || dateFilter === 'last_30_days') && Boolean(dashboardRangeOrders) && !dashboardRangeError;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRange = async () => {
+      if (dateFilter !== 'today' && dateFilter !== 'this_month' && dateFilter !== 'last_30_days') {
+        setDashboardRangeOrders(null);
+        setDashboardRangeError(null);
+        setDashboardRangeLoading(false);
+        return;
+      }
+      const now = new Date();
+      const todayStr = now.toISOString().substring(0, 10);
+      let startDate = todayStr;
+      if (dateFilter === 'this_month') {
+        startDate = `${todayStr.substring(0, 7)}-01`;
+      } else if (dateFilter === 'last_30_days') {
+        const start = new Date(`${todayStr}T00:00:00.000Z`);
+        start.setUTCDate(start.getUTCDate() - 29);
+        startDate = start.toISOString().substring(0, 10);
+      }
+      setDashboardRangeLoading(true);
+      setDashboardRangeError(null);
+      try {
+        const result = await DatabaseService.getDashboardOrdersByOrderDate({
+          startDate,
+          endDate: todayStr,
+          pageSize: 100
+        });
+        if (!cancelled) {
+          setDashboardRangeOrders(result.complete ? result.orders : null);
+          if (!result.complete) setDashboardRangeError(lang === 'ar' ? 'تعذر إثبات اكتمال بيانات الفترة.' : 'Period completeness could not be verified.');
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setDashboardRangeOrders(null);
+          setDashboardRangeError(err?.message || String(err));
+        }
+      } finally {
+        if (!cancelled) setDashboardRangeLoading(false);
+      }
+    };
+    void loadRange();
+    return () => { cancelled = true; };
+  }, [dateFilter, lang]);
 
   const filteredOrders = useMemo(() => {
+    if ((dateFilter === 'today' || dateFilter === 'this_month' || dateFilter === 'last_30_days') && dashboardRangeOrders) return dashboardRangeOrders;
     if (dateFilter === 'all') return orders;
     const today = new Date();
     // Use GMT/Local matching for dates
@@ -95,7 +144,7 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
       }
       return true;
     });
-  }, [orders, dateFilter]);
+  }, [orders, dateFilter, dashboardRangeOrders]);
 
   // Calculate high-fidelity metrics
   const stats = useMemo(() => {
@@ -296,6 +345,23 @@ export default function Dashboard({ lang, role, orders, onCardClick }: Props) {
               : 'Suivi dynamique de la rentabilité, des ventes et de l’indicateur de croissance.'}
           </p>
         </div>
+
+        {dashboardRangeLoading && (
+          <div className="text-[11px] font-bold text-sky-600 dark:text-sky-400">
+            {lang === 'ar' ? 'جاري تحميل بيانات الفترة بدقة...' : 'Loading complete period data...'}
+          </div>
+        )}
+        {dashboardRangeError && !dashboardRangeLoading && (
+          <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
+            {lang === 'ar' ? 'تعذر تحميل الفترة كاملة؛ لم يتم استبدال بيانات لوحة التحكم.' : 'Complete period data could not be loaded; existing Dashboard data was preserved.'}
+          </div>
+        )}
+
+        {!dashboardRangeLoading && !dashboardUsesCompleteRange && !dashboardRangeError && (
+          <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
+            {lang === 'ar' ? 'المؤشرات الحالية مبنية على نافذة تشغيلية محدودة؛ اختر فترة محددة لتحميل البيانات كاملة.' : 'Current metrics use a bounded operational window; choose a specific period for complete data.'}
+          </div>
+        )}
 
         {/* Dynamic segmented time filter controller */}
         <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-905 border border-slate-200/50 dark:border-slate-800/80 rounded-xl max-w-full overflow-x-auto self-start md:self-auto shrink-0">

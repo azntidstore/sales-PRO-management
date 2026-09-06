@@ -69,16 +69,19 @@
       },
       "required": ["id", "timestamp", "action", "status", "details"]
     },
-    "UserSession": {
-      "title": "UserSession",
-      "description": "User session containing their active CRM role mapped to Firebase uid",
+    "AuthorizationProfile": {
+      "title": "AuthorizationProfile",
+      "description": "UID-keyed authorization profile used by Firestore Security Rules",
       "type": "object",
       "properties": {
         "uid": { "type": "string" },
+        "sellerId": { "type": "string" },
         "name": { "type": "string" },
-        "role": { "type": "string", "enum": ["ADMIN", "DEPUTY", "SELLER"] }
+        "role": { "type": "string", "enum": ["ADMIN", "DEPUTY", "SUPERVISOR", "SELLER"] },
+        "active": { "type": "boolean" },
+        "updatedAt": { "type": "string" }
       },
-      "required": ["uid", "name", "role"]
+      "required": ["uid", "sellerId", "name", "role", "active"]
     }
   },
   "firestore": {
@@ -94,9 +97,9 @@
       "schema": "Order",
       "description": "Stores individual client bookings and orders"
     },
-    "/users/{userId}": {
-      "schema": "UserSession",
-      "description": "Stores anonymous auth uid mapping to active user role"
+    "/users/{uid}": {
+      "schema": "AuthorizationProfile",
+      "description": "UID-keyed authorization profile used by Firestore Security Rules; contains seller linkage, active flag, and role"
     },
     "/syncLogs/{logId}": {
       "schema": "SyncLog",

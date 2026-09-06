@@ -1,5 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
+import { getAuth, Auth } from 'firebase/auth';
 
 const cleanEnvVar = (val: any) => {
   if (typeof val === 'string') {
@@ -26,12 +27,14 @@ export const isFirebaseConfigured = !!(
   firebaseConfig.apiKey !== 'your-firebase-api-key'
 );
 
-let app;
+let app: any = null;
 let db: any = null;
+let auth: Auth | null = null;
 
 if (isFirebaseConfigured) {
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
   db = getFirestore(app);
+  auth = getAuth(app);
 }
 
-export { db };
+export { db, auth };

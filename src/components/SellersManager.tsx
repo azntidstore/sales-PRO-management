@@ -27,6 +27,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   const isReadOnly = role === 'PUBLIC';
 
   const canManageUserWithRole = (targetRole: 'SELLER' | 'SUPERVISOR' | 'DEPUTY' | 'ADMIN' | undefined) => {
+    if (role === 'ADMIN') return true;
     const currentRank = ROLE_RANK[role] || 0;
     const targetRank = ROLE_RANK[targetRole || 'SELLER'] || 1;
     return currentRank > targetRank;
@@ -44,7 +45,6 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
   const [phone, setPhone] = useState('');
   const [active, setActive] = useState(true);
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [sellerRole, setSellerRole] = useState<'SELLER' | 'SUPERVISOR' | 'DEPUTY' | 'ADMIN'>('SELLER');
   const [parentId, setParentId] = useState('');
   const [selectedParentIds, setSelectedParentIds] = useState<string[]>([]);
@@ -78,7 +78,6 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setPhone('');
     setActive(true);
     setEmail('');
-    setPassword('');
     setSellerRole('SELLER');
     setParentId('');
     setSelectedParentIds([]);
@@ -128,7 +127,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     return [];
   };
 
-  const handleCreateOrUpdate = (e: React.FormEvent) => {
+  const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
@@ -148,7 +147,6 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     } else if (!finalEmail) {
       finalEmail = `${name.trim().toLowerCase().replace(/\s+/g, '_')}@gmail.com`;
     }
-    const assignedPassword = password.trim() || '123456';
 
     const cleanParentIds: string[] = Array.from(new Set(
       (sellerRole === 'ADMIN' ? [] : selectedParentIds)
@@ -170,7 +168,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           toast(lang === 'ar' ? 'عذراً، لا يمكنك تعيين رتبة مساوية أو أعلى من رتبتك!' : 'Désolé, vous ne pouvez pas attribuer un rôle égal ou supérieur au vôtre.', 'error');
           return;
         }
-        fullSellers[index] = {
+        const updatedSeller: Seller = {
           ...fullSellers[index],
           name: name.trim(),
           phone: phone.trim(),
@@ -180,17 +178,18 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
           role: sellerRole,
           parentId: sellerRole === 'ADMIN' ? '' : directParentId,
           parentIds: sellerRole === 'ADMIN' ? [] : cleanParentIds,
-          assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
-          password: assignedPassword
+          assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : []
         };
-        DatabaseService.saveSellers(fullSellers);
-        DatabaseService.triggerNotification('seller_updated', currentUser || 'System', {
-          titleAr: 'تحديث بيانات بائع',
-          titleFr: 'Vendeur mis à jour',
-          titleEn: 'Seller Updated',
-          ar: `قام المسؤول "${currentUser || 'المدير'}" بتعديل بيانات البائع/المستخدم "${name.trim()}". الرتبة: ${sellerRole}.`,
-          fr: `L'administrateur "${currentUser || 'Admin'}" a mis à jour les informations du vendeur/utilisateur "${name.trim()}". Rôle: ${sellerRole}.`,
-          en: `Admin "${currentUser || 'Admin'}" updated information for seller/user "${name.trim()}". Role: ${sellerRole}.`
+        await DatabaseService.updateSeller(updatedSeller.id, {
+          name: updatedSeller.name,
+          phone: updatedSeller.phone,
+          active: updatedSeller.active,
+          username: updatedSeller.username,
+          email: updatedSeller.email,
+          role: updatedSeller.role,
+          parentId: updatedSeller.parentId,
+          parentIds: updatedSeller.parentIds,
+          assignedProducts: updatedSeller.assignedProducts
         });
         toast(t.sellerUpdatedSuccess, 'success');
       }
@@ -211,19 +210,9 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
         role: sellerRole,
         parentId: sellerRole === 'ADMIN' ? '' : directParentId,
         parentIds: sellerRole === 'ADMIN' ? [] : cleanParentIds,
-        assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : [],
-        password: assignedPassword
+        assignedProducts: sellerRole === 'SUPERVISOR' ? selectedProductIds : []
       };
-      fullSellers.push(newSeller);
-      DatabaseService.saveSellers(fullSellers);
-      DatabaseService.triggerNotification('seller_created', currentUser || 'System', {
-        titleAr: 'إضافة بائع جديد',
-        titleFr: 'Nouveau vendeur créé',
-        titleEn: 'New Seller Created',
-        ar: `تم تسجيل حساب بائع جديد باسم "${name.trim()}" برتبة ${sellerRole} بواسطة "${currentUser || 'المدير'}".`,
-        fr: `Un nouveau compte vendeur "${name.trim()}" avec le rôle de ${sellerRole} a été créé par "${currentUser || 'Admin'}".`,
-        en: `A new seller account "${name.trim()}" with role ${sellerRole} was created by "${currentUser || 'Admin'}".`
-      });
+      await DatabaseService.createSeller(newSeller);
       toast(t.sellerCreatedSuccess, 'success');
     }
 
@@ -238,7 +227,6 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setPhone(seller.phone);
     setActive(seller.active);
     setEmail(seller.email || seller.username || '');
-    setPassword(seller.password || ''); // Fallback credentials support stored in Firestore document
     setSellerRole(seller.role || 'SELLER');
     setParentId(seller.parentId || '');
     const currentPIds = (seller.parentIds && seller.parentIds.length > 0)
@@ -250,7 +238,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setIsFormOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
       return;
@@ -264,17 +252,8 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     }
 
     if (deleteConfirmId === id) {
-      const filtered = fullSellers.filter(s => s.id !== id);
-      DatabaseService.saveSellers(filtered);
+      await DatabaseService.deleteSeller(id);
       if (targetUser) {
-        DatabaseService.triggerNotification('seller_deleted', currentUser || 'System', {
-          titleAr: 'حذف بائع',
-          titleFr: 'Vendeur supprimé',
-          titleEn: 'Seller Deleted',
-          ar: `قام المسؤول "${currentUser || 'المدير'}" بحذف حساب البائع/المستخدم "${targetUser.name}".`,
-          fr: `L'administrateur "${currentUser || 'Admin'}" a supprimé le compte du vendeur/utilisateur "${targetUser.name}".`,
-          en: `Admin "${currentUser || 'Admin'}" deleted the account of seller/user "${targetUser.name}".`
-        });
       }
       toast(t.sellerDeletedSuccess, 'success');
       onDataChange();
@@ -288,7 +267,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     }
   };
 
-  const toggleActiveState = (seller: Seller) => {
+  const toggleActiveState = async (seller: Seller) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
       return;
@@ -299,22 +278,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
       return;
     }
 
-    const fullSellers = DatabaseService.getSellers();
-    const updated = fullSellers.map(s => {
-      if (s.id === seller.id) {
-        return { ...s, active: !s.active };
-      }
-      return s;
-    });
-    DatabaseService.saveSellers(updated);
-    DatabaseService.triggerNotification('seller_updated', currentUser || 'System', {
-      titleAr: 'تغيير حالة بائع',
-      titleFr: 'État du vendeur changé',
-      titleEn: 'Seller State Toggled',
-      ar: `قام المسؤول "${currentUser || 'المدير'}" بتغيير حالة البائع "${seller.name}" إلى: ${!seller.active ? 'نشط' : 'غير نشط'}.`,
-      fr: `L'administrateur "${currentUser || 'Admin'}" a changé l'état du vendeur "${seller.name}" à : ${!seller.active ? 'Actif' : 'Inactif'}.`,
-      en: `Admin "${currentUser || 'Admin'}" toggled the state of seller "${seller.name}" to: ${!seller.active ? 'Active' : 'Inactive'}.`
-    });
+    await DatabaseService.updateSeller(seller.id, { active: !seller.active });
     toast(t.sellerUpdatedSuccess, 'success');
     onDataChange();
     refreshSellers();
@@ -654,7 +618,7 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5">
                 📧 {lang === 'ar' ? 'البريد الإلكتروني (Firebase Auth)' : "Email de connexion"} *
@@ -667,23 +631,6 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 onChange={e => setEmail(e.target.value)}
                 className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
                 placeholder={lang === 'ar' ? 'example@gmail.com' : 'Ex: example@gmail.com'}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1.5 flex justify-between">
-                <span>🔑 {lang === 'ar' ? 'كلمة المرور' : 'Mot de passe'} *</span>
-                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold animate-pulse">
-                  {lang === 'ar' ? '(🔑 تُحفظ وتعمل تلقائياً فوراً)' : '(🔑 Enregistré et actif immédiatement)'}
-                </span>
-              </label>
-              <input
-                id="seller-password-input"
-                type="text"
-                required
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full text-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg py-2 px-3 text-slate-800 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-blue-500 font-mono"
-                placeholder={lang === 'ar' ? 'كلمة المرور (6 أرقام على الأقل)' : 'Min 6 caractères'}
               />
             </div>
             <div>
@@ -728,6 +675,16 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                 </span>
               </label>
             </div>
+          </div>
+
+          {/* Firebase Authentication Security Note */}
+          <div className="mb-4 text-[11px] text-blue-800 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200/60 dark:border-blue-900/50 rounded-lg p-2.5 flex items-center gap-2">
+            <span className="shrink-0 text-sm">🔒</span>
+            <span>
+              {lang === 'ar'
+                ? 'نظام المصادقة المشفر: تتم إدارة كلمات المرور وتأمين الحسابات بالكامل عبر Firebase Authentication دون تخزينها في قاعدة البيانات.'
+                : 'Sécurité Firebase Auth : La gestion des identifiants et des mots de passe est entièrement sécurisée par Firebase Auth.'}
+            </span>
           </div>
 
           {sellerRole !== 'ADMIN' && (
@@ -888,7 +845,17 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                   </td>
                   <td className="py-3 px-4 font-mono text-xs">
                     <div className="font-black text-slate-750 dark:text-slate-350">📧 {seller.email || seller.username || '-'}</div>
-                    <div className="text-[10px] text-slate-400 dark:text-slate-500 font-bold">🔑 ******* (Firebase Auth Secure)</div>
+                    {seller.uid ? (
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1 mt-0.5">
+                        <span>🛡️</span>
+                        <span>{lang === 'ar' ? 'مصادقة Firebase Auth' : 'Auth Sécurisée'}</span>
+                      </div>
+                    ) : (
+                      <div className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold flex items-center gap-1 mt-0.5">
+                        <span>👤</span>
+                        <span>{lang === 'ar' ? 'حساب بائع' : 'Compte Vendeur'}</span>
+                      </div>
+                    )}
                   </td>
                   <td className="py-3 px-4 text-xs font-semibold text-slate-650 dark:text-slate-350">
                     {getManagerDisplay(seller)}

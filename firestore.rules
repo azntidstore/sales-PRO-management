@@ -1,67 +1,300 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    // Catch-all safety net: Deny all operations by default
+    // -----------------------------------------------------------------------
+    // PHASE S2 — Firestore Authorization
+    // -----------------------------------------------------------------------
+    // Default deny. Every permitted operation below requires Firebase Auth.
+    // The /users/{uid} document is the authorization profile and is written
+    // only by trusted migration/admin flows or by an already-authorized admin.
+    // -----------------------------------------------------------------------
+
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper to validate alphanumeric and hyphenated document IDs
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    function signedIn() {
+      return request.auth != null;
     }
 
-    // Sellers Collection
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function hasProfile() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isActive() {
+      return hasProfile() && userProfile().data.active == true;
+    }
+
+    function role() {
+      return userProfile().data.role;
+    }
+
+    function isAdmin() {
+      return isActive() && role() == 'ADMIN';
+    }
+
+    function isDeputy() {
+      return isActive() && role() == 'DEPUTY';
+    }
+
+    function hasRole(r) {
+      return isActive()
+        && (role() == r
+          || (('roles' in userProfile().data)
+            && userProfile().data.roles is list
+            && userProfile().data.roles.hasAny([r])));
+    }
+
+    function isSupervisor() {
+      return hasRole('SUPERVISOR');
+    }
+
+    function isSeller() {
+      return hasRole('SELLER');
+    }
+
+    function roleRank(r) {
+      return r == 'SELLER' ? 1
+        : r == 'SUPERVISOR' ? 2
+        : r == 'DEPUTY' ? 3
+        : r == 'ADMIN' ? 4
+        : 0;
+    }
+
+    function validRole(r) {
+      return r in ['SELLER', 'SUPERVISOR', 'DEPUTY', 'ADMIN'];
+    }
+
+    function validRoleList(data) {
+      return !('roles' in data)
+        || (data.roles is list
+          && data.roles.size() > 0
+          && data.roles.size() <= 4
+          && data.roles.hasOnly(['SELLER', 'SUPERVISOR', 'DEPUTY', 'ADMIN']));
+    }
+
+    function validProfile(data) {
+      return data.uid is string
+        && data.uid == request.auth.uid
+        && data.sellerId is string
+        && data.sellerId.size() > 0
+        && data.name is string
+        && data.name.size() <= 128
+        && data.role is string
+        && validRole(data.role)
+        && data.active is bool
+        && validRoleList(data)
+        && (!('roles' in data) || data.roles.hasAny([data.role]));
+    }
+
+    function mySellerId() {
+      return userProfile().data.sellerId;
+    }
+
+    function managesSeller(data) {
+      return (('parentId' in data) && data.parentId == mySellerId())
+        || (('parentIds' in data) && data.parentIds is list && mySellerId() in data.parentIds);
+    }
+
+    function sellerIsInMyScope(sellerId) {
+      return sellerId == mySellerId()
+        || (exists(/databases/$(database)/documents/sellers/$(sellerId))
+          && managesSeller(get(/databases/$(database)/documents/sellers/$(sellerId)).data));
+    }
+
+    function orderIsInMySupervisorScope(data) {
+      return isSupervisor()
+        && ('sellerId' in data)
+        && data.sellerId is string
+        && sellerIsInMyScope(data.sellerId)
+        && ((!('assignedSupervisorId' in data)) || data.assignedSupervisorId == mySellerId());
+    }
+
+    function validId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // -----------------------------------------------------------------------
+    // Authorization profile mapping: /users/{firebaseUid}
+    // -----------------------------------------------------------------------
+    match /users/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+
+      // Creation is intended for the server-side migration/admin bootstrap.
+      // A client may only create its own profile if an already-authorized admin
+      // is performing the operation through a trusted backend. Direct client
+      // creation is therefore denied here.
+      allow create: if false;
+
+      // Only ADMIN may change authorization profiles. UID and seller linkage
+      // cannot be changed by the client, preventing account takeover via role
+      // or ownership mutation.
+      allow update: if isAdmin()
+        && request.resource.data.uid == uid
+        && request.resource.data.sellerId == resource.data.sellerId
+        && validProfile(request.resource.data)
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 128;
+
+      allow delete: if isAdmin();
+    }
+
+    // -----------------------------------------------------------------------
+    // Sellers
+    // -----------------------------------------------------------------------
     match /sellers/{sellerId} {
-      allow read: if true;
-      allow create, update: if isValidId(sellerId) 
+      // Management can read the seller directory. Sellers can read only their
+      // own profile. Queries in the client are role-scoped to match these rules.
+      allow read: if isAdmin() || isDeputy()
+        || (isSupervisor() && (sellerId == mySellerId() || managesSeller(resource.data)))
+        || (isSeller() && (resource.data.uid == request.auth.uid || sellerId == mySellerId()));
+
+      allow create: if isActive()
+        && validId(sellerId)
         && request.resource.data.id == sellerId
-        && request.resource.data.name is string && request.resource.data.name.size() <= 128
-        && (!('phone' in request.resource.data) || (request.resource.data.phone is string && request.resource.data.phone.size() <= 40));
-      allow delete: if true;
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 128
+        && request.resource.data.active is bool
+        && request.resource.data.role is string
+        && validRole(request.resource.data.role)
+        && (
+          isAdmin()
+          || (isDeputy() && roleRank(request.resource.data.role) < roleRank('DEPUTY'))
+          || (isSupervisor() && request.resource.data.role == 'SELLER' && managesSeller(request.resource.data))
+        );
+
+      allow update: if isActive()
+        && request.resource.data.id == sellerId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 128
+        && request.resource.data.active is bool
+        && request.resource.data.role is string
+        && validRole(request.resource.data.role)
+        && (
+          isAdmin()
+          || (
+            isDeputy()
+            && roleRank(resource.data.role) < roleRank('DEPUTY')
+            && roleRank(request.resource.data.role) < roleRank('DEPUTY')
+          )
+          || (
+            isSupervisor()
+            && resource.data.role == 'SELLER'
+            && request.resource.data.role == 'SELLER'
+            && managesSeller(resource.data)
+            && managesSeller(request.resource.data)
+          )
+        )
+        // Existing ownership/UID cannot be reassigned by non-admin users.
+        && (
+          isAdmin()
+          || request.resource.data.uid == resource.data.uid
+        );
+
+      allow delete: if isAdmin()
+        || (isDeputy() && resource.data.role != 'ADMIN' && roleRank(resource.data.role) < roleRank('DEPUTY'))
+        || (isSupervisor() && resource.data.role == 'SELLER' && managesSeller(resource.data));
     }
 
-    // Products Collection
+    // -----------------------------------------------------------------------
+    // Products — supervisor visibility is assignment-scoped. Admin/deputy keep
+    // management-wide read; sellers retain the existing read scope.
+    // supervisorIds = business seller IDs; supervisorUids = Auth-query index.
+    function supervisorAssignmentUnchanged(oldData, newData) {
+      return (!('supervisorIds' in oldData) && !('supervisorIds' in newData)
+        && !('supervisorUids' in oldData) && !('supervisorUids' in newData))
+        || (('supervisorIds' in oldData) && ('supervisorIds' in newData)
+          && newData.supervisorIds == oldData.supervisorIds
+          && (('supervisorUids' in oldData) == ('supervisorUids' in newData))
+          && (!('supervisorUids' in oldData) || newData.supervisorUids == oldData.supervisorUids));
+    }
+
     match /products/{productId} {
-      allow read: if true;
-      allow create, update: if isValidId(productId)
+      allow read: if isAdmin() || isDeputy()
+        || (isSupervisor() && ('supervisorUids' in resource.data)
+          && resource.data.supervisorUids.hasAny([request.auth.uid]))
+        || isSeller();
+
+      allow create: if isActive()
+        && validId(productId)
         && request.resource.data.id == productId
-        && request.resource.data.productName is string && request.resource.data.productName.size() <= 200;
-      allow delete: if true;
+        && request.resource.data.productName is string
+        && request.resource.data.productName.size() <= 200
+        && request.resource.data.wholesalePrice is number
+        && request.resource.data.sellingPrice is number
+        && request.resource.data.active is bool
+        && (!('supervisorIds' in request.resource.data) || (request.resource.data.supervisorIds is list && request.resource.data.supervisorIds.size() <= 20))
+        && (!('supervisorUids' in request.resource.data) || (request.resource.data.supervisorUids is list && request.resource.data.supervisorUids.size() <= 20))
+        && (isAdmin() || isDeputy() || isSupervisor());
+
+      allow update: if isActive()
+        && validId(productId)
+        && request.resource.data.id == productId
+        && request.resource.data.productName is string
+        && request.resource.data.productName.size() <= 200
+        && request.resource.data.wholesalePrice is number
+        && request.resource.data.sellingPrice is number
+        && request.resource.data.active is bool
+        && (!('supervisorIds' in request.resource.data) || (request.resource.data.supervisorIds is list && request.resource.data.supervisorIds.size() <= 20))
+        && (!('supervisorUids' in request.resource.data) || (request.resource.data.supervisorUids is list && request.resource.data.supervisorUids.size() <= 20))
+        && (isAdmin() || isDeputy() || (isSupervisor() && supervisorAssignmentUnchanged(resource.data, request.resource.data)));
+
+      allow delete: if isAdmin() || isDeputy() || isSupervisor();
     }
 
-    // Orders Collection
+    // -----------------------------------------------------------------------
+    // Orders — S2 enforces queryable authorization boundaries. Supervisors
+    // may read orders explicitly assigned to them, plus orders where they are
+    // the seller themselves. Legacy orders without stable sellerId /
+    // assignedSupervisorId remain management-visible only until S4 backfill.
+    // -----------------------------------------------------------------------
     match /orders/{orderId} {
-      allow read: if true;
-      allow create, update: if isValidId(orderId)
-        && request.resource.data.id == orderId
-        && request.resource.data.customerName is string && request.resource.data.customerName.size() <= 128;
-      allow delete: if true;
+      allow read: if isAdmin() || isDeputy()
+        || (isSupervisor() && (
+          (('assignedSupervisorId' in resource.data) && resource.data.assignedSupervisorId == mySellerId())
+          || (('sellerId' in resource.data) && resource.data.sellerId == mySellerId())
+        ))
+        || (isSeller() && ('sellerId' in resource.data) && resource.data.sellerId == mySellerId());
+
+      // All order creates/updates are server-only. The trusted API verifies
+      // identity, role/scope, product snapshots, financial invariants and
+      // optimistic concurrency before using Firebase Admin SDK. Keeping the
+      // browser out of this write path also makes multi-product orders scale
+      // independently of Firestore Rules expression limits.
+      allow create: if false;
+      allow update: if false;
+
+      allow delete: if isAdmin() || isDeputy() || (isSupervisor() && orderIsInMySupervisorScope(resource.data));
     }
 
-    // Notifications Collection
-    match /notifications/{notificationId} {
-      allow read: if true;
-      allow create, update: if isValidId(notificationId)
-        && request.resource.data.id == notificationId
-        && request.resource.data.creatorName is string && request.resource.data.creatorName.size() <= 128;
-      allow delete: if true;
-    }
-
-    // SyncLogs Collection
+    // -----------------------------------------------------------------------
+    // Sync logs — not writable by sellers. These are operational/audit data.
+    // -----------------------------------------------------------------------
     match /syncLogs/{logId} {
-      allow read: if true;
-      allow create, update: if isValidId(logId)
-        && request.resource.data.id == logId;
-      allow delete: if true;
+      allow read: if isAdmin() || isDeputy();
+      allow create, update: if isAdmin() || isDeputy();
+      allow delete: if isAdmin();
     }
 
-    // Settings Collection
+    // -----------------------------------------------------------------------
+    // Settings — global configuration is management-only.
+    // -----------------------------------------------------------------------
     match /settings/{settingId} {
-      allow read: if true;
-      allow create, update: if isValidId(settingId);
-      allow delete: if true;
+      allow read: if isAdmin() || isDeputy();
+      allow create, update: if isAdmin() || isDeputy();
+      allow delete: if isAdmin();
+    }
+    // -----------------------------------------------------------------------
+    // Settlement sessions — all reads/writes are server-only through the
+    // trusted session API. Direct browser access remains denied.
+    // -----------------------------------------------------------------------
+    match /settlementSessions/{sessionId} {
+      allow read, write: if false;
     }
   }
 }

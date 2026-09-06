@@ -1,0 +1,12 @@
+﻿{
+    "emulators":  {
+                      "firestore":  {
+                                        "port":  8080,
+                                        "rules":  "../firestore.rules"
+                                    },
+                      "auth":  {
+                                   "port":  9099
+                               }
+                  },
+    "projectId":  "seller-pro-management"
+}

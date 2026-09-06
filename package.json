@@ -1,39 +1,49 @@
 {
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "firebase": "^12.15.0",
-    "jspdf": "^4.2.1",
-    "jspdf-autotable": "^5.0.8",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "recharts": "^3.8.1",
-    "vite": "^6.2.3"
-  },
-  "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
-  }
+    "name":  "react-example",
+    "private":  true,
+    "version":  "0.0.0",
+    "type":  "module",
+    "scripts":  {
+                    "dev":  "vite --port=3000 --host=0.0.0.0",
+                    "build":  "vite build",
+                    "preview":  "vite preview",
+                    "clean":  "rm -rf dist server.js",
+                    "lint":  "tsc --noEmit",
+                    "test:s2-rules":  "npx firebase-tools emulators:exec --only firestore \"node tests/firestore.rules.test.mjs\"",
+                    "test:s3-financials":  "npx tsx tests/order-financials.test.ts",
+                    "test:trusted-order-api":  "node tests/trusted-order-api-contract.test.mjs",
+                    "test:trusted-order-integration":  "npx firebase-tools --project seller-pro-management emulators:exec --config firebase.json --only firestore,auth \"node tests/trusted-order-integration.test.mjs\"",
+                    "test:session-integration":  "node tests/session-integration-logic.test.mjs",
+                    "test:session-settlement":  "node tests/session-settlement.test.mjs"
+                },
+    "dependencies":  {
+                         "firebase":  "^12.15.0",
+                         "jspdf":  "^4.2.1",
+                         "jspdf-autotable":  "^5.0.8",
+                         "lucide-react":  "^0.546.0",
+                         "motion":  "^12.23.24",
+                         "react":  "^19.0.1",
+                         "react-dom":  "^19.0.1",
+                         "recharts":  "^3.8.1",
+                         "dompurify":  "^3.4.14"
+                     },
+    "devDependencies":  {
+                            "@types/express":  "^4.17.21",
+                            "@types/node":  "^22.14.0",
+                            "autoprefixer":  "^10.4.21",
+                            "esbuild":  "^0.25.0",
+                            "tailwindcss":  "^4.1.14",
+                            "tsx":  "^4.21.0",
+                            "typescript":  "~5.8.2",
+                            "vite":  "^6.2.3",
+                            "@firebase/rules-unit-testing":  "^5.0.0",
+                            "firebase-tools":  "^15.29.0",
+                            "firebase-admin":  "^14.3.0",
+                            "dotenv":  "^17.2.3",
+                            "@tailwindcss/vite":  "^4.1.14",
+                            "@vitejs/plugin-react":  "^5.0.4"
+                        },
+    "overrides":  {
+                      "protobufjs":  "7.6.6"
+                  }
 }

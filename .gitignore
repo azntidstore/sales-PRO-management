@@ -6,3 +6,14 @@ coverage/
 *.log
 .env*
 !.env.example
+
+.env.s4.local
+.env
+.env.local
+
+# Local security backups and historical validation reports
+.security-backups/
+s4-reports/
+s5-reports/
+docs/archive/security-history/
+*.zip

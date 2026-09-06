@@ -1,9 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { DatabaseService } from './dbMock';
-import { Order, Language, UserRole, AppNotification } from './types';
+import { Order, Language, UserRole, AuthStatus, WorkspaceRole } from './types';
 import { translations } from './locales';
-import { safeStorage } from './utils/safeStorage';
 import { FirestoreService } from './utils/FirestoreService';
+import { AuthService } from './utils/AuthService';
 import { isFirebaseConfigured } from './firebase';
 import { findSellerByName, isSameSellerName } from './utils/sellerUtils';
 
@@ -50,17 +50,107 @@ export default function App() {
   // active tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'products' | 'sellers'>('dashboard');
 
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    return safeStorage.getItem('crm_isLoggedIn') === 'true';
-  });
+  // Firebase Authentication Source of Truth
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
 
-  // Multiuser configuration
-  const [userRole, setUserRole] = useState<UserRole>(() => {
-    return (safeStorage.getItem('crm_userRole') as UserRole) || 'ADMIN';
-  });
-  const [currentUser, setCurrentUser] = useState<string>(() => {
-    return safeStorage.getItem('crm_currentUser') || 'عبد الله (Admin)';
-  });
+  // In-memory User Session (Derived authoritatively from authenticated Firebase UID)
+  const [userRole, setUserRole] = useState<UserRole>('SELLER');
+  const [currentUser, setCurrentUser] = useState<string>('');
+  const [currentSellerId, setCurrentSellerId] = useState<string>('');
+  const [currentSellerRecord, setCurrentSellerRecord] = useState<import('./types').Seller | null>(null);
+  // S5-D-C-E1: one Firebase UID may declare multiple role contexts.
+  // The active workspace is session/UI state only and must not be used as an authorization source.
+  const [availableWorkspaces, setAvailableWorkspaces] = useState<WorkspaceRole[]>(['SELLER']);
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceRole>('SELLER');
+  const [workspaceReady, setWorkspaceReady] = useState<boolean>(false);
+  const [workspaceSwitching, setWorkspaceSwitching] = useState<boolean>(false);
+
+  // Source of Truth: Listen strictly to Firebase Authentication State
+  useEffect(() => {
+    const unsubscribe = AuthService.onAuthStateChanged(async (user) => {
+      if (!user) {
+        setIsLoggedIn(false);
+        setUserRole('SELLER');
+        setAvailableWorkspaces(['SELLER']);
+        setActiveWorkspace('SELLER');
+        setCurrentUser('');
+        setCurrentSellerId('');
+        setCurrentSellerRecord(null);
+        setWorkspaceReady(false);
+        setAvailableWorkspaces(['SELLER']);
+        setActiveWorkspace('SELLER');
+        setAuthStatus('unauthenticated');
+        return;
+      }
+
+      try {
+        const profile = await AuthService.fetchSellerProfile(user.uid, user.email || undefined);
+        if (profile) {
+          if (profile.active === false) {
+            await AuthService.signOut();
+            setIsLoggedIn(false);
+            setUserRole('SELLER');
+            setCurrentUser('');
+            setCurrentSellerId('');
+            setCurrentSellerRecord(null);
+            setWorkspaceReady(false);
+            setAuthStatus('unauthenticated');
+            addToast(lang === 'ar' ? '⚠️ هذا الحساب معطل حالياً من طرف المدير.' : '⚠️ Ce compte est désactivé.', 'error');
+            return;
+          }
+          const primaryRole = (profile.role || 'SELLER') as WorkspaceRole;
+          const declaredRoles = Array.isArray(profile.roles) ? profile.roles : [primaryRole];
+          const workspaces = Array.from(new Set<WorkspaceRole>([primaryRole, ...declaredRoles]));
+          setAvailableWorkspaces(workspaces);
+          setActiveWorkspace(primaryRole);
+          setUserRole(primaryRole);
+          setCurrentUser(profile.name);
+          setCurrentSellerId(profile.id || '');
+          setCurrentSellerRecord(profile);
+          setWorkspaceReady(workspaces.length <= 1);
+          setIsLoggedIn(true);
+          setAuthStatus('authenticated');
+        } else {
+          // No seller profile found matching this authenticated Firebase UID - fail safely
+          await AuthService.signOut();
+          setIsLoggedIn(false);
+          setUserRole('SELLER');
+          setCurrentUser('');
+          setCurrentSellerId('');
+          setCurrentSellerRecord(null);
+          setWorkspaceReady(false);
+          setAuthStatus('unauthenticated');
+          addToast(
+            lang === 'ar'
+              ? '❌ تم التحقق من الحساب ولكن لا يوجد ملف بائع مطابق في النظام.'
+              : '❌ Compte authentifié mais aucun profil vendeur associé trouvé.',
+            'error'
+          );
+        }
+      } catch (err: any) {
+        console.error('Error resolving profile during auth state change:', err);
+        await AuthService.signOut();
+        setIsLoggedIn(false);
+        setUserRole('SELLER');
+        setAvailableWorkspaces(['SELLER']);
+        setActiveWorkspace('SELLER');
+        setCurrentUser('');
+        setCurrentSellerId('');
+        setCurrentSellerRecord(null);
+        setWorkspaceReady(false);
+        setAuthStatus('unauthenticated');
+        addToast(
+          lang === 'ar'
+            ? '❌ حدث خطأ أثناء تحميل بيانات الملف الشخصي.'
+            : '❌ Erreur lors du chargement du profil.',
+          'error'
+        );
+      }
+    });
+
+    return () => unsubscribe();
+  }, [lang]);
 
   // Master Data Refresh Trigger
   const [dataTrigger, setDataTrigger] = useState(0);
@@ -78,13 +168,6 @@ export default function App() {
   // Profile dropdown visibility
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // Notifications states
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  const [lastViewedNotificationTime, setLastViewedNotificationTime] = useState<number>(() => {
-    return Number(safeStorage.getItem('crm_lastViewedNotificationTime') || '0');
-  });
-
   const [firestoreError, setFirestoreError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -97,78 +180,22 @@ export default function App() {
 
   const rawOrders = DatabaseService.getOrders();
   const rawSellers = DatabaseService.getSellers();
-  const currentSellerProfile = findSellerByName(rawSellers, currentUser);
+  const currentSellerProfile = rawSellers.find(s => s.id === currentSellerId) || currentSellerRecord || findSellerByName(rawSellers, currentUser);
 
-  // Filter notifications by hierarchy visibility constraints
-  const isNotificationVisible = (notif: AppNotification): boolean => {
-    // ADMIN (Manager & General Manager) sees everything
-    if (userRole === 'ADMIN') {
-      return true;
-    }
-
-    // Seller management notifications (seller_created, seller_updated, seller_deleted)
-    if (notif.type.startsWith('seller')) {
-      // Visible only to DEPUTY and ADMIN (ADMIN is already handled above)
-      return userRole === 'DEPUTY';
-    }
-
-    // Order notifications (order_created, order_updated, order_deleted)
-    if (notif.type.startsWith('order')) {
-      if (!currentSellerProfile) {
-        return userRole === 'DEPUTY'; // Default fallback for virtual/system logins
-      }
-
-      const creatorProfile = findSellerByName(rawSellers, notif.creatorName);
-      if (!creatorProfile) {
-        return userRole === 'DEPUTY'; // Fallback if creator is not found
-      }
-
-      // Traversal to find all ancestor leaders up the chain (supporting multi-parents)
-      const ancestors = new Set<string>();
-      const queue = [creatorProfile];
-      const visited = new Set<string>([creatorProfile.id]);
-
-      while (queue.length > 0) {
-        const currNode = queue.shift()!;
-        if (currNode.parentId) {
-          ancestors.add(currNode.parentId);
-          if (!visited.has(currNode.parentId)) {
-            visited.add(currNode.parentId);
-            const parent = rawSellers.find(s => s.id === currNode.parentId);
-            if (parent) queue.push(parent);
-          }
-        }
-        if (currNode.parentIds) {
-          currNode.parentIds.forEach(pId => {
-            ancestors.add(pId);
-            if (!visited.has(pId)) {
-              visited.add(pId);
-              const parent = rawSellers.find(s => s.id === pId);
-              if (parent) queue.push(parent);
-            }
-          });
-        }
-      }
-
-      // The logged-in user can see it if they are an administrative leader in the creator's path
-      return ancestors.has(currentSellerProfile.id);
-    }
-
-    return false;
-  };
-
-  const visibleNotifications = notifications.filter(isNotificationVisible);
-
-  // Initialize Database on application load helper
+  // PHASE S2: Firestore listeners start only after Firebase Auth and the
+  // UID-keyed authorization profile have been verified. This prevents an
+  // unauthenticated startup read from bypassing the new Firestore rules.
   useEffect(() => {
-    DatabaseService.initialize()
+    if (!isLoggedIn || authStatus !== 'authenticated' || !workspaceReady) return;
+
+    DatabaseService.initialize(activeWorkspace)
       .then(() => {
         refreshAllData();
       })
       .catch((err) => {
-        console.error("Failed to initialize system database:", err);
+        console.error('Failed to initialize authorized system database:', err);
       });
-  }, []);
+  }, [isLoggedIn, authStatus, workspaceReady, activeWorkspace]);
 
   // Configure DOM element classes for RTL and theme support on mounting & change state
   useEffect(() => {
@@ -185,37 +212,6 @@ export default function App() {
       html.classList.remove('dark');
     }
   }, [darkMode]);
-
-  // Listen to real-time notifications
-  useEffect(() => {
-    if (!isLoggedIn || !isFirebaseConfigured) return;
-
-    let initialLoadDone = false;
-    const mountTime = Date.now();
-
-    const unsubscribe = FirestoreService.onNotificationsChange((list) => {
-      setNotifications(list);
-
-      if (!initialLoadDone) {
-        initialLoadDone = true;
-        return;
-      }
-
-      // Check if there is a new notification added after mountTime
-      const newest = list[0];
-      if (newest && Date.parse(newest.timestamp) > mountTime) {
-        const isSelf = newest.creatorName === currentUser;
-        if (!isSelf && isNotificationVisible(newest)) {
-          const msg = lang === 'ar' ? newest.detailsAr : lang === 'fr' ? newest.detailsFr : newest.detailsEn;
-          addToast(msg, 'info');
-        }
-      }
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [isLoggedIn, lang, currentUser, userRole, currentSellerProfile, rawSellers, dataTrigger]);
 
   // Handle real-time database cache updates
   useEffect(() => {
@@ -236,49 +232,53 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  const handleRoleChange = (role: UserRole, loginName?: string) => {
-    // Only accept ADMIN or SELLER. Fallback to ADMIN if PUBLIC is somehow passed.
-    const cleanRole: UserRole = role === 'PUBLIC' ? 'SELLER' : role;
-    setUserRole(cleanRole);
-    safeStorage.setItem('crm_userRole', cleanRole);
-    
-    let targetUser = '';
-    if (cleanRole === 'ADMIN') {
-      targetUser = 'عبد الله (Admin)';
-    } else {
-      targetUser = loginName || 'أحمد الإدريسي (Ahmed)';
-      // If switched to Seller, reset tab to dashboard so they don't access hidden pages
-      if (activeTab === 'products' || activeTab === 'sellers') {
-        setActiveTab('dashboard');
-      }
+  const handleWorkspaceSwitch = async (nextRole: WorkspaceRole) => {
+    if (nextRole === activeWorkspace || !availableWorkspaces.includes(nextRole)) return;
+    setWorkspaceSwitching(true);
+    setIsProfileOpen(false);
+    setInitialStatusFilter(null);
+    setSelectedEditingOrder(null);
+    setIsOrderModalOpen(false);
+    try {
+      // E3: switch the scoped Firebase listeners before exposing the new workspace.
+      // The same Firebase Auth UID/session is retained; workspace is UI/session state only.
+      setWorkspaceReady(false);
+      await DatabaseService.switchWorkspace(nextRole);
+      setActiveWorkspace(nextRole);
+      setWorkspaceReady(true);
+      setDataTrigger(prev => prev + 1);
+      addToast(
+        lang === 'ar'
+          ? `تم التبديل إلى مساحة ${nextRole === 'SUPERVISOR' ? 'المشرف' : 'البائع'} دون تسجيل الخروج.`
+          : `Espace ${nextRole === 'SUPERVISOR' ? 'Superviseur' : 'Vendeur'} activé sans déconnexion.`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Workspace switch failed:', err);
+      addToast(
+        lang === 'ar' ? 'تعذر تبديل مساحة العمل. لم يتم تغيير الجلسة.' : 'Impossible de changer d’espace. La session reste inchangée.',
+        'error'
+      );
+    } finally {
+      setWorkspaceSwitching(false);
     }
-    
-    setCurrentUser(targetUser);
-    safeStorage.setItem('crm_currentUser', targetUser);
-    setDataTrigger(prev => prev + 1);
-    addToast(
-      lang === 'ar'
-        ? `🔐 تم الدخول كـ: ${targetUser.replace(' (Admin)', '')}`
-        : `🔐 Connecté en tant que: ${targetUser.replace(' (Admin)', '')}`,
-      'success'
-    );
   };
 
-  const handleLogin = (role: UserRole, name: string) => {
-    setIsLoggedIn(true);
-    setUserRole(role);
-    setCurrentUser(name);
-    safeStorage.setItem('crm_isLoggedIn', 'true');
-    safeStorage.setItem('crm_userRole', role);
-    safeStorage.setItem('crm_currentUser', name);
-    setDataTrigger(prev => prev + 1);
-  };
-
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await AuthService.signOut();
+    } catch (e) {
+      console.warn('Sign out error:', e);
+    }
     setIsLoggedIn(false);
-    safeStorage.removeItem('crm_isLoggedIn');
-    safeStorage.removeItem('crm_userRole');
-    safeStorage.removeItem('crm_currentUser');
+    setUserRole('SELLER');
+    setCurrentUser('');
+    setCurrentSellerId('');
+    setCurrentSellerRecord(null);
+    setWorkspaceReady(false);
+    setAvailableWorkspaces(['SELLER']);
+    setActiveWorkspace('SELLER');
+    setAuthStatus('unauthenticated');
     addToast(
       lang === 'ar' ? '🔒 تم تسجيل الخروج بنجاح.' : '🔒 Déconnecté avec succès.',
       'info'
@@ -361,6 +361,23 @@ export default function App() {
     }
   }
 
+  // Splash / Loading screen while Firebase Auth initializes to prevent unauthorized flicker
+  if (authStatus === 'loading') {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex flex-col items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg animate-pulse">
+            <Shield className="w-6 h-6" />
+          </div>
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+            <span className="w-3.5 h-3.5 rounded-full border-2 border-blue-600 border-t-transparent animate-spin"></span>
+            <span>{lang === 'ar' ? 'جاري التحقق من المصادقة الآمنة...' : 'Vérification de la session...'}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans transition-colors duration-200">
@@ -394,12 +411,37 @@ export default function App() {
         <LoginScreen
           lang={lang}
           setLang={setLang}
-          onLogin={handleLogin}
           toast={addToast}
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           firestoreError={firestoreError}
         />
+      </div>
+    );
+  }
+
+  if (isLoggedIn && !workspaceReady && availableWorkspaces.length > 1) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-4 font-sans" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+        <div className="w-full max-w-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-8">
+          <div className="text-center mb-7">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-lg mb-4"><Shield className="w-7 h-7" /></div>
+            <h1 className="text-xl font-black text-slate-900 dark:text-white">{lang === 'ar' ? 'اختر مساحة العمل' : 'Choisissez votre espace'}</h1>
+            <p className="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">{lang === 'ar' ? 'نفس الحساب ونفس Firebase UID. الاختيار يؤثر على الواجهة فقط.' : 'Même compte et même UID Firebase. Le choix agit uniquement sur l’interface.'}</p>
+          </div>
+          <div className="grid gap-3">
+            {availableWorkspaces.map(role => (
+              <button key={role} onClick={() => handleWorkspaceSwitch(role)} disabled={workspaceSwitching}
+                className="w-full p-4 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 hover:bg-blue-50/60 dark:hover:bg-blue-950/20 transition text-right disabled:opacity-60">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center">{role === 'SUPERVISOR' ? <Shield className="w-5 h-5 text-amber-600" /> : <User className="w-5 h-5 text-blue-600" />}</div>
+                  <div className="flex-1"><div className="font-black text-sm text-slate-800 dark:text-slate-100">{role === 'SUPERVISOR' ? (lang === 'ar' ? 'مساحة المشرف' : 'Espace Superviseur') : (lang === 'ar' ? 'مساحة البائع' : 'Espace Vendeur')}</div><div className="text-[10px] text-slate-500 mt-1">{role === 'SUPERVISOR' ? (lang === 'ar' ? 'إدارة ومتابعة البائعين التابعين لك.' : 'Suivi des vendeurs sous votre responsabilité.') : (lang === 'ar' ? 'طلباتك ومبيعاتك الخاصة.' : 'Vos commandes et ventes.')}</div></div>
+                </div>
+              </button>
+            ))}
+          </div>
+          <button onClick={handleLogout} className="mt-5 w-full py-2.5 rounded-xl text-xs font-black text-rose-600 bg-rose-50 dark:bg-rose-950/20">{lang === 'ar' ? 'تسجيل الخروج' : 'Se déconnecter'}</button>
+        </div>
       </div>
     );
   }
@@ -484,54 +526,10 @@ export default function App() {
               </span>
             </div>
             
-            {userRole === 'ADMIN' ? (
-              <div className="relative">
-                <select
-                  id="profile-user-select"
-                  value={currentUser}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    const isAdm = val === 'عبد الله (Admin)';
-                    const matched = DatabaseService.getSellers().find(s => s.name === val);
-                    const selectedRole = isAdm ? 'ADMIN' : (matched?.role || 'SELLER');
-                    handleRoleChange(selectedRole, val);
-                  }}
-                  className="w-full bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 text-[11px] font-extrabold py-2 px-2.5 pr-8 rounded-lg text-slate-750 dark:text-slate-300 focus:outline-hidden cursor-pointer appearance-none shadow-xs transition"
-                >
-                  <option value="عبد الله (Admin)">
-                    👑 {lang === 'ar' ? 'عبد الله (المدير)' : 'Abdellah (Admin)'}
-                  </option>
-                  {DatabaseService.getSellers()
-                    .filter(s => s.active)
-                    .map(seller => {
-                      const prefix = seller.role === 'ADMIN' ? '👑' : seller.role === 'DEPUTY' ? '🛡️' : seller.role === 'SUPERVISOR' ? '👥' : '💼';
-                      const suffix = seller.role === 'ADMIN' 
-                        ? (lang === 'ar' ? '(مدير)' : '(Admin)') 
-                        : seller.role === 'DEPUTY' 
-                        ? (lang === 'ar' ? '(نائب م)' : '(Adjoint)') 
-                        : seller.role === 'SUPERVISOR' 
-                        ? (lang === 'ar' ? '(مشرف)' : '(Supervisor)') 
-                        : (lang === 'ar' ? '(بائع)' : '(Vendeur)');
-                      return (
-                        <option key={seller.id} value={seller.name}>
-                          {prefix} {seller.name} {suffix}
-                        </option>
-                      );
-                    })
-                  }
-                </select>
-                <div className="absolute inset-y-0 right-0 flex items-center pr-2.5 pointer-events-none text-slate-400">
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </div>
-              </div>
-            ) : (
-              <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-lg text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-2 shadow-2xs">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
-                <span className="truncate">{currentUser}</span>
-              </div>
-            )}
+            <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 rounded-lg text-xs font-black text-slate-700 dark:text-slate-300 flex items-center gap-2 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+              <span className="truncate">{currentUser}</span>
+            </div>
             
             <div className="mt-2 text-[10px] text-slate-400 dark:text-slate-500 leading-relaxed font-semibold">
               {userRole === 'ADMIN' 
@@ -590,7 +588,7 @@ export default function App() {
                     {currentUser.replace(' (Admin)', '').replace(' (Ahmed)', '')}
                   </span>
                   <span className="text-[10px] font-bold px-1.5 py-0.2 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-md">
-                    {userRole === 'ADMIN' ? (lang === 'ar' ? 'المدير' : 'Admin') : (lang === 'ar' ? 'بائع مخصص' : 'Profil Vendeur')}
+                    {userRole === 'ADMIN' ? (lang === 'ar' ? 'المدير' : 'Admin') : userRole === 'DEPUTY' ? (lang === 'ar' ? 'نائب المدير' : 'Adjoint') : userRole === 'SUPERVISOR' ? (lang === 'ar' ? 'المشرف' : 'Superviseur') : (lang === 'ar' ? 'البائع' : 'Vendeur')}
                   </span>
                 </div>
               </div>
@@ -612,95 +610,6 @@ export default function App() {
                   <option value="fr">Français</option>
                   <option value="en">English (US)</option>
                 </select>
-              </div>
-
-              {/* Real-time Notifications Bell */}
-              <div className="relative" id="notifications-dropdown-wrapper">
-                <button
-                  onClick={() => {
-                    setIsNotificationsOpen(!isNotificationsOpen);
-                    if (!isNotificationsOpen) {
-                      const now = Date.now();
-                      setLastViewedNotificationTime(now);
-                      safeStorage.setItem('crm_lastViewedNotificationTime', String(now));
-                    }
-                  }}
-                  className="cursor-pointer p-1.5 sm:p-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition relative flex items-center justify-center"
-                  title={lang === 'ar' ? 'الإشعارات' : 'Notifications'}
-                >
-                  <Bell className="w-3.5 h-3.5 sm:w-4 h-4 text-slate-600 dark:text-slate-300" />
-                  {visibleNotifications.filter(n => Date.parse(n.timestamp) > lastViewedNotificationTime).length > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
-                    </span>
-                  )}
-                </button>
-
-                {isNotificationsOpen && (
-                  <div className={`absolute ${lang === 'ar' ? 'left-0' : 'right-0'} mt-2 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-205 dark:border-slate-800 rounded-xl shadow-xl z-55 animate-in fade-in duration-100 overflow-hidden`}>
-                    <div className="p-3 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-950/45">
-                      <span className="font-extrabold text-xs text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                        🔔 {lang === 'ar' ? 'إشعارات النشاطات بالمتجر' : 'Flux de Notifications'}
-                      </span>
-                      <button
-                        onClick={() => setIsNotificationsOpen(false)}
-                        className="cursor-pointer p-1 hover:bg-slate-200 dark:hover:bg-slate-850 rounded-full text-slate-400"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-850">
-                      {visibleNotifications.length === 0 ? (
-                        <div className="p-6 text-center text-xs text-slate-400 font-medium">
-                          {lang === 'ar' ? 'لا توجد إشعارات حالياً' : 'Aucune notification pour le moment'}
-                        </div>
-                      ) : (
-                        visibleNotifications.map((notif) => {
-                          const isUnread = Date.parse(notif.timestamp) > lastViewedNotificationTime;
-                          const formattedTime = new Date(notif.timestamp).toLocaleTimeString(lang === 'ar' ? 'ar-EG' : 'fr-FR', {
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          });
-                          return (
-                            <div
-                              key={notif.id}
-                              className={`p-3 text-[11px] sm:text-xs transition-colors flex items-start gap-2.5 ${
-                                isUnread ? 'bg-blue-50/50 dark:bg-blue-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-950/20'
-                              }`}
-                            >
-                              <div className="mt-0.5 shrink-0">
-                                {notif.type.startsWith('order') ? (
-                                  <div className="w-6 h-6 rounded-md bg-emerald-50 dark:bg-emerald-950/50 flex items-center justify-center border border-emerald-100/55 dark:border-emerald-800/30">
-                                    <span className="text-xs">📦</span>
-                                  </div>
-                                ) : (
-                                  <div className="w-6 h-6 rounded-md bg-blue-50 dark:bg-blue-950/50 flex items-center justify-center border border-blue-100/55 dark:border-blue-800/30">
-                                    <span className="text-xs">👤</span>
-                                  </div>
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center justify-between gap-1 mb-0.5">
-                                  <span className="font-extrabold text-slate-800 dark:text-slate-200 truncate">
-                                    {lang === 'ar' ? notif.titleAr : lang === 'fr' ? notif.titleFr : notif.titleEn}
-                                  </span>
-                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 font-bold shrink-0">
-                                    {formattedTime}
-                                  </span>
-                                </div>
-                                <p className="text-slate-500 dark:text-slate-400 leading-normal font-medium text-start">
-                                  {lang === 'ar' ? notif.detailsAr : lang === 'fr' ? notif.detailsFr : notif.detailsEn}
-                                </p>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Theme toggler */}
@@ -762,57 +671,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Dropdown profile switcher for admin */}
-                      {userRole === 'ADMIN' && (
-                        <div className="py-3 border-b border-slate-100 dark:border-slate-800">
-                          <label className="text-[10px] text-slate-400 dark:text-slate-500 font-extrabold uppercase tracking-wider block mb-1.5 ltr:text-left">
-                            👤 {lang === 'ar' ? 'تغيير المستخدم / المندوب' : 'Changer l’utilisateur'}
-                          </label>
-                          <div className="relative">
-                            <select
-                              id="header-profile-select"
-                              value={currentUser}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                const isAdm = val === 'عبد الله (Admin)';
-                                const matched = DatabaseService.getSellers().find(s => s.name === val);
-                                const selectedRole = isAdm ? 'ADMIN' : (matched?.role || 'SELLER');
-                                handleRoleChange(selectedRole, val);
-                                setIsProfileOpen(false);
-                              }}
-                              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-black py-2 px-2.5 pr-8 rounded-lg text-slate-755 dark:text-slate-300 focus:outline-hidden cursor-pointer appearance-none"
-                            >
-                              <option value="عبد الله (Admin)">
-                                👑 {lang === 'ar' ? 'عبد الله (المدير)' : 'Abdellah (Admin)'}
-                              </option>
-                              {DatabaseService.getSellers()
-                                .filter(s => s.active)
-                                .map(seller => {
-                                  const prefix = seller.role === 'ADMIN' ? '👑' : seller.role === 'DEPUTY' ? '🛡️' : seller.role === 'SUPERVISOR' ? '👥' : '💼';
-                                  const suffix = seller.role === 'ADMIN' 
-                                    ? (lang === 'ar' ? '(مدير)' : '(Admin)') 
-                                    : seller.role === 'DEPUTY' 
-                                    ? (lang === 'ar' ? '(نائب م)' : '(Adjoint)') 
-                                    : seller.role === 'SUPERVISOR' 
-                                    ? (lang === 'ar' ? '(مشرف)' : '(Supervisor)') 
-                                    : (lang === 'ar' ? '(بائع)' : '(Vendeur)');
-                                  return (
-                                    <option key={seller.id} value={seller.name}>
-                                      {prefix} {seller.name} {suffix}
-                                    </option>
-                                  );
-                                })
-                              }
-                            </select>
-                            <div className="absolute inset-y-0 right-0 p-2 pointer-events-none text-slate-400">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7" />
-                              </svg>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
                       {/* Display current permissions shortly */}
                       <div className="py-2.5 text-[10px] text-slate-400 dark:text-slate-500 leading-normal font-semibold ltr:text-left">
                         {userRole === 'ADMIN' 
@@ -820,6 +678,19 @@ export default function App() {
                           : (lang === 'ar' ? 'صلاحيات بائع مخصص: معاينة وإدخال طلبيات وإدارة محدودة.' : 'Droits Vendeur : Enregistrement de commandes.')
                         }
                       </div>
+
+                      {availableWorkspaces.length > 1 && (
+                        <div className="py-3 border-t border-slate-100 dark:border-slate-800">
+                          <div className="text-[10px] font-black text-slate-400 mb-2">{lang === 'ar' ? 'مساحة العمل' : 'Espace de travail'}</div>
+                          <div className="grid grid-cols-2 gap-2">
+                            {availableWorkspaces.map(role => (
+                              <button key={role} disabled={workspaceSwitching || role === activeWorkspace} onClick={() => handleWorkspaceSwitch(role)} className={`p-2 rounded-lg text-[10px] font-black border transition ${role === activeWorkspace ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:text-blue-300' : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-blue-300'}`}>
+                                {role === 'SUPERVISOR' ? (lang === 'ar' ? 'المشرف' : 'Superviseur') : role === 'SELLER' ? (lang === 'ar' ? 'البائع' : 'Vendeur') : role}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Logout button */}
                       <button

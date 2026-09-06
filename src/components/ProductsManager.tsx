@@ -31,6 +31,8 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
   const [wholesalePrice, setWholesalePrice] = useState<string>('');
   const [sellingPrice, setSellingPrice] = useState<string>('');
   const [active, setActive] = useState(true);
+  const [supervisorIds, setSupervisorIds] = useState<string[]>([]);
+  const [supervisorUids, setSupervisorUids] = useState<string[]>([]);
 
   useEffect(() => {
     setProducts(DatabaseService.getProducts());
@@ -70,16 +72,24 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
     });
   }, [products, searchTerm, statusFilter, sortBy]);
 
+  const availableSupervisors = useMemo(() => {
+    return DatabaseService.getSellers().filter(s =>
+      s.active && (s.role === 'SUPERVISOR' || s.roles?.includes('SUPERVISOR'))
+    );
+  }, [dataTrigger, products]);
+
   const resetForm = () => {
     setProductName('');
     setWholesalePrice('');
     setSellingPrice('');
     setActive(true);
+    setSupervisorIds([]);
+    setSupervisorUids([]);
     setEditingId(null);
     setIsFormOpen(false);
   };
 
-  const handleCreateOrUpdate = (e: React.FormEvent) => {
+  const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
@@ -104,14 +114,21 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
     if (editingId) {
       const idx = currentProducts.findIndex(p => p.id === editingId);
       if (idx !== -1) {
+        await DatabaseService.updateProduct(editingId, {
+          productName: productName.trim(),
+          wholesalePrice: parsedWholesale,
+          sellingPrice: parsedSelling,
+          active,
+          supervisorIds: Array.from(new Set(supervisorIds.filter(Boolean))), supervisorUids: Array.from(new Set(supervisorUids.filter(Boolean)))
+        });
         currentProducts[idx] = {
           ...currentProducts[idx],
           productName: productName.trim(),
           wholesalePrice: parsedWholesale,
           sellingPrice: parsedSelling,
-          active
+          active,
+          supervisorIds: Array.from(new Set(supervisorIds.filter(Boolean))), supervisorUids: Array.from(new Set(supervisorUids.filter(Boolean)))
         };
-        DatabaseService.saveProducts(currentProducts);
         toast(t.productUpdatedSuccess, 'success');
       }
     } else {
@@ -121,10 +138,11 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
         wholesalePrice: parsedWholesale,
         sellingPrice: parsedSelling,
         active,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        supervisorIds: Array.from(new Set(supervisorIds.filter(Boolean))), supervisorUids: Array.from(new Set(supervisorUids.filter(Boolean)))
       };
+      await DatabaseService.createProduct(newProduct);
       currentProducts.push(newProduct);
-      DatabaseService.saveProducts(currentProducts);
       toast(t.productCreatedSuccess, 'success');
     }
 
@@ -139,18 +157,20 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
     setWholesalePrice(product.wholesalePrice === 0 ? '' : product.wholesalePrice.toString());
     setSellingPrice(product.sellingPrice === 0 ? '' : product.sellingPrice.toString());
     setActive(product.active);
+    setSupervisorIds(product.supervisorIds || []);
+    setSupervisorUids(product.supervisorUids || []);
     setIsFormOpen(true);
   };
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
       return;
     }
 
     if (deleteConfirmId === id) {
+      await DatabaseService.deleteProduct(id);
       const filtered = products.filter(p => p.id !== id);
-      DatabaseService.saveProducts(filtered);
       setProducts(filtered);
       toast(t.productDeletedSuccess, 'success');
       onDataChange();
@@ -163,19 +183,14 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
     }
   };
 
-  const toggleActiveState = (product: Product) => {
+  const toggleActiveState = async (product: Product) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
       return;
     }
 
-    const updated = products.map(p => {
-      if (p.id === product.id) {
-        return { ...p, active: !p.active };
-      }
-      return p;
-    });
-    DatabaseService.saveProducts(updated);
+    await DatabaseService.updateProduct(product.id, { active: !product.active });
+    const updated = products.map(p => p.id === product.id ? { ...p, active: !p.active } : p);
     setProducts(updated);
     toast(t.productUpdatedSuccess, 'success');
     onDataChange();
@@ -258,6 +273,34 @@ export default function ProductsManager({ lang, role, onDataChange, toast, dataT
               />
             </div>
           </div>
+          {(role === 'ADMIN' || role === 'DEPUTY') && (
+            <div className="mb-4 rounded-lg border border-slate-200 dark:border-slate-800 p-4">
+              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+                {lang === 'ar' ? 'المشرفون المكلّفون بالمنتج' : lang === 'fr' ? 'Superviseurs assignés au produit' : 'Supervisors assigned to product'}
+              </div>
+              {availableSupervisors.length === 0 ? (
+                <div className="text-xs text-slate-500">
+                  {lang === 'ar' ? 'لا يوجد مشرفون نشطون متاحون.' : lang === 'fr' ? 'Aucun superviseur actif disponible.' : 'No active supervisors available.'}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {availableSupervisors.map(supervisor => (
+                    <label key={supervisor.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={supervisorIds.includes(supervisor.id)}
+                        onChange={(e) => setSupervisorIds(current => e.target.checked
+                          ? Array.from(new Set([...current, supervisor.id]))
+                          : current.filter(id => id !== supervisor.id))}
+                      />
+                      <span>{supervisor.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-between items-center pt-2">
             <div>
               <label className="inline-flex items-center cursor-pointer">

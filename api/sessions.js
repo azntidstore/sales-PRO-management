@@ -1,0 +1,26 @@
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth } from 'firebase-admin/auth';
+import { cleanId, cleanSellerId, assertOpenSessionShape, assertSessionAggregates, calculateSessionAggregates, buildSettlementInvoice } from './sessionCore.js';
+
+const PROJECT_ID = process.env.FIREBASE_ADMIN_PROJECT_ID || process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT;
+const CLIENT_EMAIL = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
+const PRIVATE_KEY = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const USE_EMULATORS = Boolean(process.env.FIRESTORE_EMULATOR_HOST && process.env.FIREBASE_AUTH_EMULATOR_HOST);
+const app = getApps().length ? getApps()[0] : USE_EMULATORS
+  ? initializeApp({ projectId: PROJECT_ID || 'seller-pro-management' })
+  : initializeApp({ credential: cert({ projectId: PROJECT_ID, clientEmail: CLIENT_EMAIL, privateKey: PRIVATE_KEY }), projectId: PROJECT_ID });
+const db = getFirestore(app);
+const adminAuth = getAuth(app);
+
+function json(res,status,payload){res.status(status).setHeader('Content-Type','application/json');res.end(JSON.stringify(payload));}
+function queryValue(req,key){const u=new URL(req.url||'http://localhost/api/sessions','http://localhost');return u.searchParams.get(key)||'';}
+function bearer(req){const v=req.headers.authorization||'';return v.startsWith('Bearer ')?v.slice(7).trim():'';}
+async function auth(req){const token=bearer(req);if(!token)throw Object.assign(new Error('AUTH_REQUIRED'),{status:401});const decoded=await adminAuth.verifyIdToken(token);const uid=decoded.uid;const snap=await db.doc(`users/${uid}`).get();if(!snap.exists||snap.data()?.uid!==uid||snap.data()?.active!==true)throw Object.assign(new Error('AUTH_PROFILE_INVALID'),{status:403});const p=snap.data();const roles=Array.from(new Set([p.role,...(Array.isArray(p.roles)?p.roles:[])].filter(Boolean)));return {uid,profile:p,roles};}
+function manager(ctx){return ctx.roles.includes('ADMIN')||ctx.roles.includes('DEPUTY');}
+async function sellerFor(ctx,sellerId){const id=cleanSellerId(sellerId||ctx.profile.sellerId);if(!manager(ctx)&&id!==ctx.profile.sellerId)throw Object.assign(new Error('SELLER_SCOPE_DENIED'),{status:403});const s=await db.doc(`sellers/${id}`).get();if(!s.exists||s.data()?.active!==true)throw Object.assign(new Error('SELLER_NOT_FOUND'),{status:400});return {id,data:s.data()};}
+async function openSession(ctx,body){if(!manager(ctx))throw Object.assign(new Error('SESSION_OPEN_DENIED'),{status:403});const {id:sellerId}=await sellerFor(ctx,body.sellerId);const existing=await db.collection('settlementSessions').where('sellerId','==',sellerId).where('status','==','OPEN').limit(1).get();if(!existing.empty)throw Object.assign(new Error('SESSION_ALREADY_OPEN'),{status:409});const ref=db.collection('settlementSessions').doc();const now=new Date().toISOString();const session={sessionId:ref.id,sellerId,status:'OPEN',openedAt:now,openedByUid:ctx.uid,orderCount:0,totalSales:0,totalProfit:0};assertOpenSessionShape(session);await ref.create(session);return session;}
+async function getSession(ctx,body){if(!manager(ctx))throw Object.assign(new Error('SESSION_ARCHIVE_DENIED'),{status:403});const sessionId=cleanId(body.sessionId);const snap=await db.doc(`settlementSessions/${sessionId}`).get();if(!snap.exists)throw Object.assign(new Error('SESSION_NOT_FOUND'),{status:404});const session=snap.data();if(session.status!=='CLOSED')throw Object.assign(new Error('SESSION_NOT_CLOSED'),{status:409});return session;}
+async function closeSession(ctx,body){if(!manager(ctx))throw Object.assign(new Error('SESSION_CLOSE_DENIED'),{status:403});const sessionId=cleanId(body.sessionId);const ref=db.doc(`settlementSessions/${sessionId}`);const result=await db.runTransaction(async tx=>{const ss=await tx.get(ref);if(!ss.exists)throw Object.assign(new Error('SESSION_NOT_FOUND'),{status:404});const session=ss.data();assertOpenSessionShape(session);const seller=await sellerFor(ctx,session.sellerId);void seller;const q=db.collection('orders').where('sessionId','==',sessionId).where('sellerId','==',session.sellerId);const os=await tx.get(q);const orders=os.docs.map(d=>d.data());const aggregates=calculateSessionAggregates(orders);assertSessionAggregates(aggregates);const now=new Date().toISOString();const invoice=buildSettlementInvoice(sessionId,session.sellerId,aggregates,now);const closed={...session,...aggregates,status:'CLOSED',closedAt:now,closedByUid:ctx.uid,invoice,updatedAt:now};tx.update(ref,closed);return closed;});return result;}
+async function handler(req,res){try{if(!['GET','POST','PATCH'].includes(req.method))return json(res,405,{ok:false,error:'METHOD_NOT_ALLOWED'});const ctx=await auth(req);const body=typeof req.body==='object'&&req.body?req.body:{};if(req.method==='GET')body.sessionId=queryValue(req,'sessionId');const result=req.method==='POST'?await openSession(ctx,body):req.method==='PATCH'?await closeSession(ctx,body):await getSession(ctx,body);return json(res,200,{ok:true,session:result});}catch(e){console.error('[sessions-api]',e);const status=Number.isInteger(e?.status)?e.status:(e?.code?.startsWith?.('auth/')?401:400);return json(res,status,{ok:false,error:e?.message||'SESSION_OPERATION_FAILED'});}}
+export default handler;

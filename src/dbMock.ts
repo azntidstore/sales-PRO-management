@@ -1,10 +1,47 @@
-import { Seller, Product, Order, SheetsSyncLog, AppNotification } from './types';
+import { Seller, Product, Order, SheetsSyncLog, WorkspaceRole } from './types';
 import { FirestoreService } from './utils/FirestoreService';
 import { isFirebaseConfigured } from './firebase';
-import { safeStorage } from './utils/safeStorage';
 
 // Real-time memory cache
 let cacheSellers: Seller[] = [];
+
+/**
+ * S5-D-C-C.5.1 Order Store
+ * In-memory UI data only. Never used for authorization.
+ * Legacy cache/listener remains intact until the UI integration gate.
+ */
+type OrderStoreState = {
+  operational: Order[];
+  historicalPages: Map<string, { orders: Order[]; nextCursor: any | null; hasMore: boolean }>;
+};
+
+const orderStore: OrderStoreState = {
+  operational: [],
+  historicalPages: new Map(),
+};
+
+function resetOrderStore(): void {
+  orderStore.operational = [];
+  orderStore.historicalPages.clear();
+}
+
+function publishOrderStoreOperational(orders: Order[]): void {
+  orderStore.operational = [...orders];
+}
+
+function historicalPageKey(options: {
+  pageSize?: number;
+  startDate?: string;
+  endDate?: string;
+} = {}): string {
+  return JSON.stringify({
+    pageSize: Math.min(Math.max(options.pageSize ?? 50, 1), 100),
+    startDate: options.startDate || '',
+    endDate: options.endDate || '',
+  });
+}
+
+
 let cacheProducts: Product[] = [];
 let cacheOrders: Order[] = [];
 let cacheLogs: SheetsSyncLog[] = [];
@@ -18,187 +55,113 @@ let cacheConfig: any = {
 let onChangeCallback: (() => void) | null = null;
 let unsubscribes: (() => void)[] = [];
 
-// ==========================================
-// هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-// CODE À SUPPRIMER APRÈS EXPORT (DEFAULT MOCKS HAVE BEEN CLEARED)
-// ==========================================
-const DEFAULT_LOCAL_SELLERS: Seller[] = [
-  { 
-    id: 'admin_1', 
-    name: 'عبد الله (Abdellah)', 
-    phone: '0600000000', 
-    active: true, 
-    createdAt: '2026-06-20T00:00:00.000Z', 
-    username: 'abdellah', 
-    email: 'ouaddou.abdellah.topo@gmail.com', 
-    role: 'ADMIN',
-    password: '123'
-  }
-];
-const DEFAULT_LOCAL_PRODUCTS: Product[] = [];
-const DEFAULT_LOCAL_ORDERS: Order[] = [];
-// ==========================================
-// هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-// ==========================================
+// Production database boundary: Firestore is the only persistent data source.
+// LocalStorage is intentionally NOT used for sellers/products/orders/sync state.
 
-// Local storage helpers used when Firestore isn't connected
-const loadLocal = (key: string, fallback: any) => {
-  // ==========================================
-  // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-  // ==========================================
-  try {
-    const val = safeStorage.getItem(`smart_crm_${key}`);
-    return val ? JSON.parse(val) : fallback;
-  } catch {
-    return fallback;
+const requireFirebaseDatabase = (): void => {
+  if (!isFirebaseConfigured) {
+    throw new Error('FIREBASE_NOT_CONFIGURED: persistent database access is unavailable.');
   }
-  // ==========================================
-  // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-  // ==========================================
 };
 
-const saveLocal = (key: string, val: any) => {
-  // ==========================================
-  // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-  // ==========================================
-  try {
-    safeStorage.setItem(`smart_crm_${key}`, JSON.stringify(val));
-  } catch {}
-  // ==========================================
-  // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-  // ==========================================
-};
-
-// Initialize variables and state flag
+// Initialization state is in-memory only; it is never persisted to browser storage.
 export let isInitialized = false;
 
-// Load data from LocalStorage as fallback or baseline
-export function loadFromLocalStorage() {
-  const rawSellers = loadLocal('sellers', DEFAULT_LOCAL_SELLERS);
-  if (!Array.isArray(rawSellers)) {
-    cacheSellers = DEFAULT_LOCAL_SELLERS;
-  } else {
-    cacheSellers = rawSellers.map((s: Seller) => {
-      const pIds = Array.isArray(s.parentIds) 
-        ? s.parentIds.filter(Boolean) 
-        : (s.parentId ? [s.parentId] : []);
-      return {
-        ...s,
-        id: s.id,
-        phone: s.phone || '',
-        parentId: s.parentId || (pIds.length > 0 ? pIds[0] : ''),
-        parentIds: pIds
-      };
-    });
-  }
-  cacheProducts = loadLocal('products', DEFAULT_LOCAL_PRODUCTS);
-  if (!Array.isArray(cacheProducts)) {
-    cacheProducts = DEFAULT_LOCAL_PRODUCTS;
-  }
-  cacheOrders = loadLocal('orders', DEFAULT_LOCAL_ORDERS);
-  if (!Array.isArray(cacheOrders)) {
-    cacheOrders = DEFAULT_LOCAL_ORDERS;
-  }
-  cacheLogs = loadLocal('syncLogs', []);
-  if (!Array.isArray(cacheLogs)) {
-    cacheLogs = [];
-  }
-  cacheConfig = loadLocal('sheetsConfig', cacheConfig);
-}
-
-// Save data to LocalStorage
-export function saveToLocalStorage() {
-  saveLocal('sellers', cacheSellers);
-  saveLocal('products', cacheProducts);
-  saveLocal('orders', cacheOrders);
-  saveLocal('syncLogs', cacheLogs);
-  saveLocal('sheetsConfig', cacheConfig);
-}
-
 // Main initialization logic
-export async function initializeDatabase(): Promise<void> {
-  if (isInitialized) return;
-  isInitialized = true;
+async function attachFirebaseListeners(userRole?: string): Promise<void> {
+  if (!isFirebaseConfigured) return;
 
-  // Render immediately with local baseline
-  loadFromLocalStorage();
+  unsubscribes.forEach(u => u());
+  unsubscribes = [];
+  cacheSellers = [];
+  cacheProducts = [];
+  cacheOrders = [];
+  resetOrderStore();
+  cacheLogs = [];
+  cacheConfig = {};
+  if (onChangeCallback) onChangeCallback();
 
-  if (isFirebaseConfigured) {
-    try {
-      // Explicitly run seeding and verification
-      await FirestoreService.verifyAndSeedDatabase();
-      console.log('Database verification and seeding completed.');
-
-      // Setup snapshot listeners
-      unsubscribes.push(
-        FirestoreService.onSellersChange((data) => {
-          cacheSellers = data;
-          saveLocal('sellers', data);
-          if (onChangeCallback) onChangeCallback();
-        })
-      );
-      unsubscribes.push(
-        FirestoreService.onProductsChange((data) => {
-          cacheProducts = data;
-          saveLocal('products', data);
-          if (onChangeCallback) onChangeCallback();
-        })
-      );
-      unsubscribes.push(
-        FirestoreService.onOrdersChange((data) => {
-          cacheOrders = data;
-          saveLocal('orders', data);
-          if (onChangeCallback) onChangeCallback();
-        })
-      );
+  try {
+    console.log(`[SESSION] Attaching Firebase listeners for workspace: ${userRole || 'primary'}`);
+    unsubscribes.push(
+      FirestoreService.onSellersChange((data) => {
+        cacheSellers = data;
+        if (onChangeCallback) onChangeCallback();
+      }, userRole as WorkspaceRole)
+    );
+    unsubscribes.push(
+      FirestoreService.onProductsChange((data) => {
+        cacheProducts = data;
+        if (onChangeCallback) onChangeCallback();
+      }, userRole as WorkspaceRole)
+    );
+    unsubscribes.push(
+      FirestoreService.onOrdersChange((data) => {
+        cacheOrders = data;
+        if (onChangeCallback) onChangeCallback();
+      }, userRole as WorkspaceRole)
+    );
+    if (userRole === 'ADMIN' || userRole === 'DEPUTY') {
       unsubscribes.push(
         FirestoreService.onSyncLogsChange((data) => {
           cacheLogs = data;
-          saveLocal('syncLogs', data);
           if (onChangeCallback) onChangeCallback();
         })
       );
       unsubscribes.push(
         FirestoreService.onSettingsChange((data) => {
           cacheConfig = data;
-          saveLocal('sheetsConfig', data);
           if (onChangeCallback) onChangeCallback();
         })
       );
-    } catch (err) {
-      console.warn('Firebase initialization resolved to local standby mode. Falling back to secure localStorage baseline:', err);
-      loadFromLocalStorage();
     }
+  } catch (err) {
+    console.error('Firebase authorization initialization failed. Failing closed without local fallback.', err);
+    cacheSellers = [];
+    cacheProducts = [];
+    cacheOrders = [];
+    cacheLogs = [];
+    cacheConfig = {};
+    if (onChangeCallback) onChangeCallback();
+  }
+}
+
+export async function initializeDatabase(userRole?: string): Promise<void> {
+  if (isInitialized) return;
+  isInitialized = true;
+  if (isFirebaseConfigured) {
+    console.log('Authorized Firebase database initialization. Automatic client seeding is disabled.');
+    await attachFirebaseListeners(userRole);
   } else {
-    console.log('Smart CRM is running in Local Standby Offline Mode. Real-time Firebase listeners are disabled.');
+    console.warn('Firebase is not configured. Database remains locked; no local authentication fallback is available.');
+    cacheSellers = [];
+    cacheProducts = [];
+    cacheOrders = [];
+    cacheLogs = [];
+    cacheConfig = {};
   }
 }
 
-// Auto-trigger on module load to guarantee instant execution
-initializeDatabase().catch(err => {
-  console.error("Auto DB initialization failed:", err);
-});
-
-// Helper to calculate profit exactly based on rules
-export function calculateOrderProfit(
-  wholesalePrice: number,
-  sellingPrice: number,
-  quantity: number,
-  deliveryCost: number,
-  totalAmount: number,
-  status: string
-): number {
-  if (status !== 'DELIVERED') {
-    return 0;
+export async function switchDatabaseWorkspace(userRole: string): Promise<void> {
+  if (!isFirebaseConfigured) return;
+  if (!isInitialized) {
+    await initializeDatabase(userRole);
+    return;
   }
-  // Formula: TotalAmount - DeliveryCost - (WholesalePrice * Quantity)
-  const productCost = wholesalePrice * quantity;
-  return totalAmount - deliveryCost - productCost;
+  await attachFirebaseListeners(userRole);
 }
+
+// PHASE S2: Do not start Firestore listeners before Firebase Auth has
+// established an authenticated, authorized user profile. App.tsx explicitly
+// initializes the database after the auth/profile gate succeeds.
 
 export class DatabaseService {
-  static async initialize(): Promise<void> {
-    await initializeDatabase();
+  static async initialize(userRole?: string): Promise<void> {
+    await initializeDatabase(userRole);
+  }
+
+  static async switchWorkspace(userRole: string): Promise<void> {
+    await switchDatabaseWorkspace(userRole);
   }
 
   // Callback trigger registered by active React views
@@ -210,87 +173,243 @@ export class DatabaseService {
     return cacheSellers;
   }
 
-  static async saveSellers(sellers: Seller[]): Promise<void> {
-    const oldSellers = [...cacheSellers];
-    const sanitizedSellers = sellers.map(s => {
-      const pIds = Array.isArray(s.parentIds)
-        ? s.parentIds.filter(Boolean)
-        : (s.parentId ? [s.parentId] : []);
-      return {
-        ...s,
-        id: s.id,
-        phone: s.phone || '',
-        parentId: s.parentId || (pIds.length > 0 ? pIds[0] : ''),
-        parentIds: pIds
-      };
-    });
-
-    cacheSellers = sanitizedSellers;
-    saveLocal('sellers', sanitizedSellers);
+  static async createSeller(seller: Seller): Promise<void> {
+    requireFirebaseDatabase();
     if (isFirebaseConfigured) {
       try {
-        const newIds = new Set(sanitizedSellers.map(s => s.id));
-        const deleted = oldSellers.filter(s => !newIds.has(s.id));
-        await Promise.all([
-          ...sanitizedSellers.map(s => FirestoreService.saveSeller(s)),
-          ...deleted.map(s => FirestoreService.deleteSeller(s.id))
-        ]);
-        FirestoreService.reportError('sellers_write', null);
+        await FirestoreService.createSeller(seller);
       } catch (err: any) {
-        console.error('Failed to save sellers/sync deletions to Firestore:', err);
         FirestoreService.reportError('sellers_write', err?.message || String(err));
+        throw err;
       }
     }
+    cacheSellers = [...cacheSellers, seller];
+    if (onChangeCallback) onChangeCallback();
+  }
+
+  static async updateSeller(id: string, patch: Partial<Seller>): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.updateSeller(id, patch);
+      } catch (err: any) {
+        FirestoreService.reportError('sellers_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheSellers = cacheSellers.map(s => s.id === id ? { ...s, ...patch, id } : s);
+    if (onChangeCallback) onChangeCallback();
+  }
+
+  static async deleteSeller(id: string): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.deleteSeller(id);
+      } catch (err: any) {
+        FirestoreService.reportError('sellers_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheSellers = cacheSellers.filter(s => s.id !== id);
+    if (onChangeCallback) onChangeCallback();
+  }
+
+  static async createProduct(product: Product): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.createProduct(product);
+      } catch (err: any) {
+        FirestoreService.reportError('products_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheProducts = [...cacheProducts, product];
+    if (onChangeCallback) onChangeCallback();
+  }
+
+  static async updateProduct(id: string, patch: Partial<Product>): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.updateProduct(id, patch);
+      } catch (err: any) {
+        FirestoreService.reportError('products_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheProducts = cacheProducts.map(p => p.id === id ? { ...p, ...patch, id } : p);
+    if (onChangeCallback) onChangeCallback();
+  }
+
+  static async deleteProduct(id: string): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.deleteProduct(id);
+      } catch (err: any) {
+        FirestoreService.reportError('products_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheProducts = cacheProducts.filter(p => p.id !== id);
     if (onChangeCallback) onChangeCallback();
   }
 
   static getProducts(): Product[] {
+    // The product cache is already role-scoped by FirestoreService.onProductsChange().
+    // Return the current scoped cache without performing another Firestore read.
     return cacheProducts;
   }
 
-  static async saveProducts(products: Product[]): Promise<void> {
-    const oldProducts = [...cacheProducts];
-    cacheProducts = products;
-    saveLocal('products', products);
+  static getOrderEligibleProducts(): Product[] {
+    // Order UI may only select active products from the already role-scoped cache.
+    // This is a presentation/selection filter, not an authorization boundary.
+    return cacheProducts.filter((product) => product.active);
+  }
+
+
+  static async getOperationalOrders(days = 30, pageSize = 100): Promise<{
+    orders: Order[];
+    nextCursor: any | null;
+    hasMore: boolean;
+  }> {
     if (isFirebaseConfigured) {
-      try {
-        const newIds = new Set(products.map(p => p.id));
-        const deleted = oldProducts.filter(p => !newIds.has(p.id));
-        await Promise.all([
-          ...products.map(p => FirestoreService.saveProduct(p)),
-          ...deleted.map(p => FirestoreService.deleteProduct(p.id))
-        ]);
-        FirestoreService.reportError('products_write', null);
-      } catch (err: any) {
-        console.error('Failed to save products/sync deletions to Firestore:', err);
-        FirestoreService.reportError('products_write', err?.message || String(err));
-      }
+      return FirestoreService.getOperationalOrders(days, pageSize);
     }
-    if (onChangeCallback) onChangeCallback();
+    throw new Error('FIREBASE_NOT_CONFIGURED');
+  }
+  static async getHistoricalOrdersPage(options: {
+    pageSize?: number;
+    cursor?: any;
+    startDate?: string;
+    endDate?: string;
+  } = {}): Promise<{
+    orders: Order[];
+    nextCursor: any | null;
+    hasMore: boolean;
+  }> {
+    if (isFirebaseConfigured) {
+      return FirestoreService.getHistoricalOrdersPage(options);
+    }
+    throw new Error('FIREBASE_NOT_CONFIGURED');
+  }
+  static getOperationalOrderStore(): Order[] {
+    return [...orderStore.operational];
+  }
+
+  static async loadOperationalOrderStore(days = 30, pageSize = 100): Promise<{
+    orders: Order[];
+    nextCursor: any | null;
+    hasMore: boolean;
+  }> {
+    const result = await DatabaseService.getOperationalOrders(days, pageSize);
+    publishOrderStoreOperational(result.orders);
+    return result;
+  }
+
+  static async getDashboardOrdersByOrderDate(options: {
+    startDate: string;
+    endDate: string;
+    pageSize?: number;
+  }): Promise<{ orders: Order[]; complete: boolean; pages: number }> {
+    if (isFirebaseConfigured) {
+      return FirestoreService.getDashboardOrdersByOrderDate(options);
+    }
+    throw new Error('FIREBASE_NOT_CONFIGURED');
+  }
+  static async loadHistoricalOrderPage(options: {
+    pageSize?: number;
+    cursor?: any;
+    startDate?: string;
+    endDate?: string;
+  } = {}): Promise<{
+    orders: Order[];
+    nextCursor: any | null;
+    hasMore: boolean;
+  }> {
+    const key = historicalPageKey(options);
+    if (!options.cursor) {
+      const cached = orderStore.historicalPages.get(key);
+      if (cached) return { ...cached, orders: [...cached.orders] };
+    }
+    const result = await DatabaseService.getHistoricalOrdersPage(options);
+    if (!options.cursor) {
+      orderStore.historicalPages.set(key, { ...result, orders: [...result.orders] });
+    }
+    return result;
+  }
+
+  static async getOrderForView(id: string): Promise<Order | null> {
+    requireFirebaseDatabase();
+    const operational = orderStore.operational.find(o => o.id === id);
+    if (operational) return operational;
+    return FirestoreService.getOrderById(id);
   }
 
   static getOrders(): Order[] {
     return cacheOrders;
   }
 
-  static async saveOrders(orders: Order[]): Promise<void> {
-    const oldOrders = [...cacheOrders];
-    cacheOrders = orders;
-    saveLocal('orders', orders);
+  static async createOrder(order: Order): Promise<Order> {
+    requireFirebaseDatabase();
     if (isFirebaseConfigured) {
       try {
-        const newIds = new Set(orders.map(o => o.id));
-        const deleted = oldOrders.filter(o => !newIds.has(o.id));
-        await Promise.all([
-          ...orders.map(o => FirestoreService.saveOrder(o)),
-          ...deleted.map(o => FirestoreService.deleteOrder(o.id))
-        ]);
-        FirestoreService.reportError('orders_write', null);
+        const created = await FirestoreService.createOrder(order);
+        cacheOrders = [...cacheOrders, created];
+        if (onChangeCallback) onChangeCallback();
+        return created;
       } catch (err: any) {
-        console.error('Failed to save orders/sync deletions to Firestore:', err);
         FirestoreService.reportError('orders_write', err?.message || String(err));
+        throw err;
       }
     }
+    cacheOrders = [...cacheOrders, order];
+    if (onChangeCallback) onChangeCallback();
+    return order;
+  }
+
+  /** S5-D-C-C.5.9 prototype; intentionally not wired to Dashboard yet. */
+  static async getDashboardAllAggregates(): Promise<{
+    complete: boolean; orders: number; pending: number; delivered: number; delayed: number; rejected: number;
+    totalSales: number; totalProfits: number; queries: number;
+  }> {
+    requireFirebaseDatabase();
+    return FirestoreService.getDashboardAllAggregates();
+  }
+
+  static async updateOrder(id: string, patch: Partial<Order>, expectedUpdatedAt: string): Promise<Order> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        const updated = await FirestoreService.updateOrder(id, patch, expectedUpdatedAt);
+        cacheOrders = cacheOrders.map(o => o.id === id ? updated : o);
+        if (onChangeCallback) onChangeCallback();
+        return updated;
+      } catch (err: any) {
+        FirestoreService.reportError('orders_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    const updated = cacheOrders.find(o => o.id === id);
+    const fallback = updated ? { ...updated, ...patch, id } : ({ ...patch, id } as Order);
+    cacheOrders = cacheOrders.map(o => o.id === id ? fallback : o);
+    if (onChangeCallback) onChangeCallback();
+    return fallback;
+  }
+
+  static async deleteOrder(id: string): Promise<void> {
+    requireFirebaseDatabase();
+    if (isFirebaseConfigured) {
+      try {
+        await FirestoreService.deleteOrder(id);
+      } catch (err: any) {
+        FirestoreService.reportError('orders_write', err?.message || String(err));
+        throw err;
+      }
+    }
+    cacheOrders = cacheOrders.filter(o => o.id !== id);
     if (onChangeCallback) onChangeCallback();
   }
 
@@ -299,8 +418,8 @@ export class DatabaseService {
   }
 
   static async saveSheetsLogs(logs: SheetsSyncLog[]): Promise<void> {
+    requireFirebaseDatabase();
     cacheLogs = logs;
-    saveLocal('syncLogs', logs);
     if (isFirebaseConfigured) {
       try {
         await Promise.all(logs.map(log => FirestoreService.saveSyncLog(log)));
@@ -318,8 +437,8 @@ export class DatabaseService {
   }
 
   static async saveSheetsConfig(config: any): Promise<void> {
+    requireFirebaseDatabase();
     cacheConfig = config;
-    saveLocal('sheetsConfig', config);
     if (isFirebaseConfigured) {
       try {
         await FirestoreService.saveSheetsConfig(config);
@@ -333,74 +452,21 @@ export class DatabaseService {
   }
 
   static syncOrderToSheets(order: Order, isNew: boolean): boolean {
-    if (isFirebaseConfigured) {
-      FirestoreService.syncOrderToSheets(order, isNew).catch(err => {
-        console.error('Failed to sync order to sheets via Firestore:', err);
-      });
-    } else {
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // ==========================================
-      const timestamp = new Date().toISOString();
-      const logId = 'log_' + Date.now() + Math.random().toString(36).substring(2, 6);
-      
-      if (cacheConfig.connected) {
-        const actionName = `${isNew ? 'CREATE_ORDER' : 'UPDATE_ORDER'} (${order.id})`;
-        const newLog: SheetsSyncLog = {
-          id: logId,
-          timestamp,
-          action: actionName,
-          status: 'SUCCESS',
-          details: `[Local Mode] Successfully simulated mirror: Client=${order.customerName}, Status=${order.orderStatus}, Profit=${order.profit} MAD.`
-        };
-        const updatedLogs = [newLog, ...cacheLogs];
-        this.saveSheetsLogs(updatedLogs);
-
-        const updatedConfig = { ...cacheConfig, lastSynced: timestamp };
-        this.saveSheetsConfig(updatedConfig);
-      }
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // ==========================================
-    }
+    if (!isFirebaseConfigured) return false;
+    FirestoreService.syncOrderToSheets(order, isNew).catch(err => {
+      console.error('Failed to sync order to sheets via Firestore:', err);
+    });
     return true;
   }
 
   static retrySyncAll(): { successCount: number; failed: boolean } {
+    if (!isFirebaseConfigured) return { successCount: 0, failed: true };
     const count = cacheConfig.syncQueue?.length || 0;
-    if (isFirebaseConfigured) {
-      FirestoreService.retrySyncAll(cacheOrders).catch(err => {
-        console.error('Failed to retry sync queue:', err);
-      });
-    } else {
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // ==========================================
-      const updatedConfig = { ...cacheConfig, syncQueue: [] };
-      this.saveSheetsConfig(updatedConfig);
-      // ==========================================
-      // هذا كود زائد - يمكنك حذفه بعد تحميل المشروع
-      // ==========================================
-    }
+    FirestoreService.retrySyncAll(cacheOrders).catch(err => {
+      console.error('Failed to retry sync queue:', err);
+    });
     return { successCount: count, failed: false };
   }
 
-  static triggerNotification(
-    type: AppNotification['type'],
-    creatorName: string,
-    details: {
-      ar: string;
-      fr: string;
-      en: string;
-      titleAr: string;
-      titleFr: string;
-      titleEn: string;
-    }
-  ): void {
-    if (isFirebaseConfigured) {
-      FirestoreService.triggerNotification(type, creatorName, details).catch(err => {
-        console.error('Failed to trigger notification:', err);
-      });
-    }
-  }
+
 }
