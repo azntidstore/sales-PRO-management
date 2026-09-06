@@ -477,8 +477,7 @@ export default function OrdersTable({
     // E3-E: profit is now calculated authoritatively by the trusted server API.
     // The client sends only the requested status change and concurrency version.
     const orderPatch: Partial<Order> = {
-      orderStatus: newStatus as any,
-      updatedAt: new Date().toISOString()
+      orderStatus: newStatus as any
     };
     let updatedOrder: Order;
     try {

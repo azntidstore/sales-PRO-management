@@ -433,8 +433,7 @@ export default function OrderFormModal({
         orderStatus,
         ...financialFields,
         sellerId: selectedSeller?.id || originalOrder.sellerId,
-        assignedSupervisorId: effectiveSupervisorId,
-        updatedAt: new Date().toISOString()
+        assignedSupervisorId: effectiveSupervisorId
       };
 
       // Historical creator identity is not inferred during edits. If it already exists, preserve it untouched.

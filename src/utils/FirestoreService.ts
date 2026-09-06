@@ -1188,10 +1188,13 @@ export class FirestoreService {
     if (typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) {
       throw new Error('ORDER_CONCURRENCY_EXPECTED_VERSION_REQUIRED');
     }
+    // updatedAt is server-owned; never send a client-generated timestamp.
+    const { updatedAt: _clientUpdatedAt, ...safePatch } = patch as any;
+    void _clientUpdatedAt;
     return this.callTrustedOrderApi('PATCH', {
       id,
       expectedUpdatedAt,
-      ...patch,
+      ...safePatch,
       items: Array.isArray(patch.items) ? patch.items.map(item => ({ productId: item.productId, quantity: item.quantity })) : undefined,
     });
   }
