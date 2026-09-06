@@ -180,6 +180,18 @@ export class DatabaseService {
     return cacheSellers;
   }
 
+  static async provisionExistingSellerAccount(seller: Seller): Promise<{ uid: string; authCreated: boolean }> {
+    requireFirebaseDatabase();
+    if (!isFirebaseConfigured) {
+      throw new Error('FIREBASE_NOT_CONFIGURED: persistent database access is unavailable.');
+    }
+
+    const result = await FirestoreService.provisionSellerAccount(seller);
+    cacheSellers = cacheSellers.map(item => item.id === seller.id ? { ...item, uid: result.uid } : item);
+    if (onChangeCallback) onChangeCallback();
+    return result;
+  }
+
   static async createSeller(seller: Seller): Promise<void> {
     requireFirebaseDatabase();
     if (isFirebaseConfigured) {

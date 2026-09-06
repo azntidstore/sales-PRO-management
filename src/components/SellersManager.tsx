@@ -238,6 +238,44 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
     setIsFormOpen(true);
   };
 
+  const handleProvisionExistingSeller = async (seller: Seller) => {
+    if (isReadOnly || !canManageUserWithRole(seller.role)) {
+      toast(lang === 'ar' ? 'ليست لديك صلاحية تفعيل هذا الحساب.' : `Vous n'avez pas la permission d'activer ce compte.`, 'error');
+      return;
+    }
+
+    if (seller.uid) {
+      toast(lang === 'ar' ? 'هذا البائع مرتبط بالفعل بحساب Firebase.' : 'Ce vendeur est déjà lié à un compte Firebase.', 'info');
+      return;
+    }
+
+    if (!(seller.email || seller.username)?.trim()) {
+      toast(lang === 'ar' ? 'لا يمكن تفعيل الحساب بدون بريد إلكتروني.' : `Impossible d'activer le compte sans adresse e-mail.`, 'error');
+      return;
+    }
+
+    try {
+      const result = await DatabaseService.provisionExistingSellerAccount(seller);
+      toast(
+        lang === 'ar'
+          ? `تم تفعيل حساب ${seller.name} بنجاح. تم إرسال رابط تعيين كلمة المرور إلى البريد الإلكتروني.`
+          : `Le compte de ${seller.name} a été activé. Un lien de définition du mot de passe a été envoyé.`,
+        'success'
+      );
+      console.info('[SELLER PROVISIONING] Existing seller activated:', { sellerId: seller.id, uid: result.uid, authCreated: result.authCreated });
+      onDataChange();
+      refreshSellers();
+    } catch (error: any) {
+      console.error('[SELLER PROVISIONING] Existing seller activation failed:', error);
+      toast(
+        lang === 'ar'
+          ? `تعذر تفعيل الحساب: ${error?.message || 'خطأ غير معروف'}`
+          : `Échec de l'activation : ${error?.message || 'Erreur inconnue'}`,
+        'error'
+      );
+    }
+  };
+
   const handleDelete = async (id: string) => {
     if (isReadOnly) {
       toast(t.permissionDeniedError, 'error');
@@ -901,6 +939,16 @@ export default function SellersManager({ lang, role, currentUser, onDataChange, 
                   {!isReadOnly && (
                     <td className="py-3 px-4">
                       <div className="flex gap-1.5 justify-center items-center">
+                        {canManageUserWithRole(seller.role) && !seller.uid && (
+                          <button
+                            id={`activate-seller-${seller.id}`}
+                            onClick={() => handleProvisionExistingSeller(seller)}
+                            className="cursor-pointer px-2 py-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:text-emerald-300 rounded transition"
+                            title={lang === 'ar' ? 'تفعيل حساب Firebase وإرسال رابط كلمة المرور' : 'Activer Firebase et envoyer le lien de mot de passe'}
+                          >
+                            {lang === 'ar' ? 'تفعيل' : 'Activer'}
+                          </button>
+                        )}
                         {canManageUserWithRole(seller.role) ? (
                           <button
                             id={`edit-seller-${seller.id}`}
